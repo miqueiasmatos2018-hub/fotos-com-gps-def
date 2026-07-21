@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FOTOS COM GPS</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Cinzel:wght@700;900&family=Cormorant+Garamond:wght@300;400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css"/>
+<link rel="stylesheet" href="styles.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/leaflet-rotate@0.2.8/dist/leaflet-rotate-src.js"></script>
+<script src="https://api.mapbox.com/mapbox.js/plugins/leaflet-omnivore/v0.3.1/leaflet-omnivore.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/exifr/dist/full.umd.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/piexifjs@1.0.6/piexif.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-group">
+      <span class="logo-ms">MS</span>
+      <span class="logo-sub">Automations</span>
+    </div>
+  </div>
+  <div class="header-meta">
+    Photo Metadata Explorer<br>
+    GPS · EXIF · Location
+  </div>
+</header>
+
+<div class="app">
+  <div class="sidebar" id="sidebar">
+    <div class="sidebar-resizer" id="sidebarResizer"></div>
+    <button class="sidebar-toggle" id="sidebarToggle" title="Minimizar / Expandir painel">◀</button>
+    <div class="upload-zone" id="uploadZone">
+      <input type="file" id="fileInput" accept="image/*" multiple style="display:none">
+    </div>
+    <div class="date-timeline-header">DATAS</div>
+    <div class="date-timeline" id="dateTimeline">
+      <div class="date-timeline-empty">No photos loaded yet</div>
+    </div>
+
+    <div class="progress-bar">
+      <div class="progress-fill" id="progressFill"></div>
+    </div>
+
+    <div class="stats-bar">
+      <div class="stat">
+        <span class="stat-val" id="statTotal">0</span>
+        PHOTOS
+      </div>
+      <div class="stat">
+        <span class="stat-val accent" id="statGPS">0</span>
+        WITH GPS
+      </div>
+      <div class="stat">
+        <span class="stat-val" id="statNoGPS">0</span>
+        NO GPS
+      </div>
+    </div>
+
+    <div class="tab-bar">
+      <button class="tab-btn active" id="tabPhotos" onclick="switchTab('photos')">📷 Photos</button>
+      <button class="tab-btn" id="tabMeta" onclick="switchTab('meta')">🗂 Metadata</button>
+      <button class="tab-btn" id="tabPontos" onclick="switchTab('pontos')">📌 Pontos</button>
+    </div>
+
+    <div class="tab-content active" id="tabContentPhotos">
+      <div class="sort-bar" id="sortBar">
+        <span class="sort-label">ORDENAR</span>
+        <button class="sort-btn" id="sortBtnDate" onclick="setSort('date','desc')" title="Data mais recente primeiro">DATA ↓</button>
+        <button class="sort-btn" id="sortBtnDateAsc" onclick="setSort('date','asc')" title="Data mais antiga primeiro">DATA ↑</button>
+        <button class="sort-btn active" id="sortBtnNameAsc" onclick="setSort('name','asc')" title="Nome A→Z">NOME ↑</button>
+        <button class="sort-btn" id="sortBtnNameDesc" onclick="setSort('name','desc')" title="Nome Z→A">NOME ↓</button>
+      </div>
+      <div class="dot-legend">
+        <div class="dot-legend-item">
+          <div class="dot-legend-dot gps"></div>
+          <span class="dot-legend-label">COM GPS</span>
+        </div>
+        <div class="dot-legend-item">
+          <div class="dot-legend-dot no-gps"></div>
+          <span class="dot-legend-label">SEM GPS</span>
+        </div>
+        <div class="dot-legend-item">
+          <div class="dot-legend-dot dup-gps"></div>
+          <span class="dot-legend-label">GPS DUPLO</span>
+        </div>
+        <div class="dot-legend-item">
+          <div class="dot-legend-dot mp-ok"></div>
+          <span class="dot-legend-label">≥12 MP</span>
+        </div>
+        <div class="dot-legend-item">
+          <div class="dot-legend-dot mp-low"></div>
+          <span class="dot-legend-label">&lt;12 MP</span>
+        </div>
+      </div>
+      <div class="photo-list" id="photoList"></div>
+      <div class="detail-panel" id="detailPanel" style="display:none">
+        <div class="detail-header">
+          <span style="font-family:var(--mono);font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;">
+            EXIF DATA <span class="meta-saved-dot" id="metaSavedDot"></span>
+          </span>
+          <button class="btn-edit-meta" id="editMetaBtn" onclick="toggleMetaEdit()">✎ EDIT</button>
+        </div>
+        <div class="detail-rows" id="detailRows"></div>
+      </div>
+    </div>
+
+    <div class="tab-content" id="tabContentPontos">
+      <div class="pontos-toolbar">
+        <button class="btn-add-ponto" id="btnAddPonto" onclick="togglePontoPicking()">📌 Clicar no mapa</button>
+      </div>
+      <div class="pontos-empty" id="pontosEmpty">
+        <span style="font-size:28px;opacity:0.3;">📌</span>
+        <div style="font-family:var(--mono);font-size:9px;letter-spacing:1.5px;color:var(--muted);margin-top:8px;text-transform:uppercase;">Nenhum ponto criado</div>
+        <div style="font-family:var(--mono);font-size:8px;color:var(--border2);margin-top:4px;">Clique no botão acima ou use a barra de busca</div>
+      </div>
+      <div class="pontos-list" id="pontosList"></div>
+    </div>
+
+    <div class="tab-content" id="tabContentMeta">
+      <div id="metaTabEmpty" class="meta-tab-empty">NO PHOTOS YET<br>Add photos in the Photos tab</div>
+      <div id="metaBulkWrap" style="display:none; flex:1; min-height:0; display:flex; flex-direction:column; overflow:hidden;">
+        <div class="meta-bulk-bar">
+          <button class="meta-bulk-toggle" id="metaBulkToggle" onclick="toggleBulkEdit()">
+            <span class="bulk-chevron">▶</span> ✏ Edit All Photos
+          </button>
+          <div class="meta-bulk-fields" id="metaBulkFields">
+            <div class="meta-bulk-field-row"><span class="meta-bulk-field-key">Camera Make</span><input class="meta-bulk-input" id="bulk_Make" placeholder="leave blank to skip"></div>
+            <div class="meta-bulk-field-row"><span class="meta-bulk-field-key">Camera Model</span><input class="meta-bulk-input" id="bulk_Model" placeholder="leave blank to skip"></div>
+            <div class="meta-bulk-field-row"><span class="meta-bulk-field-key">Lens</span><input class="meta-bulk-input" id="bulk_LensModel" placeholder="leave blank to skip"></div>
+            <div class="meta-bulk-field-row"><span class="meta-bulk-field-key">Focal Length</span><input class="meta-bulk-input" id="bulk_FocalLength" placeholder="mm — leave blank to skip" type="number"></div>
+            <div class="meta-bulk-field-row"><span class="meta-bulk-field-key">Aperture f/</span><input class="meta-bulk-input" id="bulk_FNumber" placeholder="leave blank to skip" type="number" step="0.1"></div>
+            <div class="meta-bulk-field-row"><span class="meta-bulk-field-key">ISO</span><input class="meta-bulk-input" id="bulk_ISO" placeholder="leave blank to skip" type="number"></div>
+            <div class="meta-bulk-field-row"><span class="meta-bulk-field-key">Software</span><input class="meta-bulk-input" id="bulk_Software" placeholder="leave blank to skip"></div>
+            <div class="meta-bulk-field-row"><span class="meta-bulk-field-key">GPS Lat</span><input class="meta-bulk-input" id="bulk_lat" placeholder="leave blank to skip" type="number" step="any"></div>
+            <div class="meta-bulk-field-row"><span class="meta-bulk-field-key">GPS Lng</span><input class="meta-bulk-input" id="bulk_lng" placeholder="leave blank to skip" type="number" step="any"></div>
+            <button class="meta-bulk-apply" onclick="applyBulkEdit()">⬇ Apply to All Photos</button>
+          </div>
+        </div>
+        <div class="meta-photo-list" id="metaPhotoList"></div>
+      </div>
+    </div>
+
+    <div class="export-bar" id="exportBar">
+      <button class="btn-export-single" id="exportSingleBtn" onclick="exportSingle()" title="Export selected photo as JPG">↓ SELECTED</button>
+      <button class="btn-export" id="exportAllBtn" onclick="exportAllSmart()">⬇ EXPORT ALL → fotos renomeadas.zip</button>
+    </div>
+  </div>
+
+  <div class="map-container">
+    <div class="empty-map" id="emptyState">
+      <div class="empty-map-text">UPLOAD<br>PHOTOS</div>
+      <div class="empty-map-sub">GPS coordinates will appear on map</div>
+    </div>
+    <div class="map-search-bar">
+      <div class="map-search-pill">
+        <span class="kml-search-icon">🔍</span>
+        <input type="text" id="kmlSearchInput" class="kml-search-input"
+          placeholder="Buscar ponto no KML..." autocomplete="off" spellcheck="false"
+          style="flex:1;background:transparent;border:none;outline:none;color:var(--text);font-family:var(--mono);font-size:11px;letter-spacing:0.5px;padding:10px 0;">
+        <button class="kml-search-clear" id="kmlSearchClear" title="Limpar" style="display:none;">✕</button>
+      </div>
+      <div class="kml-search-results" id="kmlSearchResults"></div>
+    </div>
+    <div id="map">
+
+    </div>
+    <div class="measure-banner" id="measureBanner">📏 Clique para marcar pontos · ESC para cancelar</div>
+<div class="dup-gps-popup" id="dupGpsPopup">
+  <span class="dup-gps-icon">📍</span>
+  <div class="dup-gps-title">GPS duplicado detectado</div>
+  <div class="dup-gps-count" id="dupGpsCount"></div>
+  <div class="dup-gps-sub">fotos com coordenadas idênticas</div>
+  <div class="dup-gps-slider-wrap">
+    <div class="dup-gps-slider-label">Dispersão: <span class="dup-gps-slider-val" id="dupGpsSliderVal">5m</span></div>
+    <input type="range" class="dup-gps-slider" id="dupGpsSlider" min="1" max="50" value="5" step="1">
+  </div>
+  <div class="dup-gps-btn-row">
+    <button class="dup-gps-btn primary" onclick="randomizeDupGps()">⇄ DISPERSAR</button>
+    <button class="dup-gps-btn ghost" onclick="closeDupGpsPopup()">IGNORAR</button>
+  </div>
+</div>
+
+
+<div class="picking-banner" id="pickingBanner">📍 Click on map to set new location &nbsp;·&nbsp; ESC to cancel</div>
+
+
+
+    <!-- KML DROP OVERLAY -->
+    <div class="kml-drop-overlay" id="kmlDropOverlay">
+      <div class="kml-drop-msg" id="kmlDropMsg">SOLTAR KML<br>NO MAPA</div>
+    </div>
+
+    <!-- KML PROGRESS -->
+    <div class="kml-progress" id="kmlProgress">
+      <div class="kml-progress-label">Carregando <span id="kmlFileName">KML</span>...</div>
+      <div class="kml-progress-bar"><div class="kml-progress-fill" id="kmlProgressFill"></div></div>
+    </div>
+
+    <!-- COMPASS ROSE -->
+    <div class="compass-rose" id="compassRose" title="Drag to rotate · Click to reset">
+      <svg viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg" class="compass-svg">
+        <!-- Outer ring -->
+        <circle cx="40" cy="40" r="38" fill="rgba(10,10,10,0.75)" stroke="rgba(212,245,60,0.3)" stroke-width="1"/>
+        <!-- N arrow (red/accent) -->
+        <polygon points="40,6 45,36 40,32 35,36" fill="#d4f53c"/>
+        <!-- S arrow (grey) -->
+        <polygon points="40,74 45,44 40,48 35,44" fill="#555"/>
+        <!-- E arrow -->
+        <polygon points="74,40 44,35 48,40 44,45" fill="#444"/>
+        <!-- W arrow -->
+        <polygon points="6,40 36,35 32,40 36,45" fill="#444"/>
+        <!-- Center dot -->
+        <circle cx="40" cy="40" r="4" fill="#d4f53c"/>
+        <!-- N label -->
+        <text x="40" y="20" text-anchor="middle" font-family="monospace" font-size="9" font-weight="bold" fill="#d4f53c">N</text>
+      </svg>
+      <div class="compass-bearing" id="compassBearing">0°</div>
+    </div>
+
+    <!-- ROTATE CONTROLS -->
+    <div class="rotate-controls">
+      <button class="rotate-btn" id="rotateLeft"  title="Rotate left 15°">↺</button>
+      <button class="rotate-btn reset" id="rotateReset" title="Reset north">⊕</button>
+      <button class="rotate-btn" id="rotateRight" title="Rotate right 15°">↻</button>
+    </div>
+
+    <div class="map-overlay">
+      <button class="map-btn" id="fitAllBtn" style="display:none" onclick="fitAll()">⊡ FIT ALL</button>
+      <button class="map-btn" id="clearBtn" style="display:none" onclick="clearAll()">✕ CLEAR</button>
+      <button class="map-btn" id="measureBtn" onclick="toggleMeasure()" title="Medir distância">📏 MEDIR</button>
+      <button class="map-btn" id="snvBtn" onclick="alignToSNV()" title="Alinhar mapa ao sentido da rodovia (LD_INICIO_OAE)">🧭 SNV</button>
+      <button class="map-btn" id="svBtn" onclick="openGoogleMaps()" title="Abrir Google Maps no ponto selecionado">🗺 GOOGLE MAPS</button>
+    </div>
+
+    <!-- DNIT LAYER PANEL -->
+    <div class="layer-panel">
+      <div class="layer-panel-header" onclick="toggleLayerPanel()">
+        <div class="layer-panel-title">
+          <div class="layer-dot"></div>
+          DNIT · Camadas
+        </div>
+        <span class="layer-toggle-arrow open" id="layerArrow">▲</span>
+      </div>
+      <div class="layer-list open" id="layerList">
+
+        <!-- KML IMPORT SECTION -->
+        <div class="layer-item" onclick="document.getElementById('kmlFileInput').click()" style="border-bottom:1px solid var(--border)">
+          <div class="layer-check" style="background:none;border-color:#555;color:#888;font-size:14px;">+</div>
+          <div class="layer-info">
+            <div class="layer-name">Importar KML / KMZ</div>
+            <div class="layer-desc">Clique ou arraste para o mapa</div>
+          </div>
+        </div>
+        <input type="file" id="kmlFileInput" accept=".kml,.kmz" style="display:none" multiple>
+
+        <!-- PHOTO IMPORT FROM MAP PANEL -->
+        <div class="layer-item" onclick="document.getElementById('mapPhotoInput').click()" style="border-bottom:1px solid var(--border)">
+          <div class="layer-check" style="background:none;border-color:#555;color:#888;font-size:14px;">📷</div>
+          <div class="layer-info">
+            <div class="layer-name">Importar Fotos</div>
+            <div class="layer-desc">Clique ou arraste para o mapa</div>
+          </div>
+        </div>
+        <input type="file" id="mapPhotoInput" accept="image/*" style="display:none" multiple>
+
+        <!-- AUTO-LOAD FROM FOLDER -->
+        <div class="layer-item" id="autoLoadFolderBtn" onclick="autoLoadKmlFromFolder()" style="border-bottom:1px solid var(--border)">
+          <div class="layer-check" style="background:none;border-color:#555;color:#888;font-size:14px;">📂</div>
+          <div class="layer-info">
+            <div class="layer-name">Carregar KML da Pasta</div>
+            <div class="layer-desc" id="autoLoadDesc">Seleciona pasta — carrega KML/KMZ automaticamente</div>
+          </div>
+        </div>
+        <div id="kmlLayerList"></div>
+
+        <!-- ORIENTATION LAYERS -->
+        <div style="padding:6px 10px 4px;font-family:var(--mono);font-size:8px;letter-spacing:2px;color:var(--accent);border-top:1px solid var(--border);margin-top:4px;">ORIENTAÇÃO</div>
+
+        <div class="layer-item" id="layerCities" onclick="toggleOrientLayer('cities')">
+          <div class="layer-check" id="checkCities" style="background:none;border-color:#555;font-size:10px;color:#888;">○</div>
+          <div class="layer-info">
+            <div class="layer-name">Cidades &amp; Estados</div>
+            <div class="layer-desc">Nomes de municípios e divisas</div>
+          </div>
+        </div>
+
+        <div class="layer-item" id="layerRoads" onclick="toggleOrientLayer('roads')">
+          <div class="layer-check" id="checkRoads" style="background:none;border-color:#555;font-size:10px;color:#888;">○</div>
+          <div class="layer-info">
+            <div class="layer-name">Rodovias</div>
+            <div class="layer-desc">Estradas e números de rodovias</div>
+          </div>
+        </div>
+
+        <div class="layer-item" id="layerHybrid" onclick="toggleOrientLayer('hybrid')">
+          <div class="layer-check" id="checkHybrid" style="background:none;border-color:#555;font-size:10px;color:#888;">○</div>
+          <div class="layer-info">
+            <div class="layer-name">Híbrido Completo</div>
+            <div class="layer-desc">Cidades + rodovias + limites</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+    <!-- PHOTO PROCESSING BAR -->
+    <div class="proc-bar-wrap" id="procBarWrap" style="display:none">
+      <div class="proc-bar-fill" id="procBarFill"></div>
+      <div class="proc-bar-label" id="procBarLabel">Processando fotos...</div>
+    </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- NO GPS ALERT -->
+<div class="nogps-alert-overlay" id="nogpsAlertOverlay" onclick="closeNoGpsAlert(event)">
+  <div class="nogps-alert-box">
+    <span class="nogps-alert-icon">📍</span>
+    <div class="nogps-alert-title">ATENÇÃO</div>
+    <span class="nogps-alert-count" id="nogpsAlertCount">0</span>
+    <div class="nogps-alert-sub">Fotos sem GPS detectadas</div>
+    <button class="nogps-alert-close" onclick="closeNoGpsAlert()">OK, ENTENDI</button>
+  </div>
+</div>
+
+<!-- MP ALERT -->
+<div class="mp-alert-overlay" id="mpAlertOverlay" onclick="closeMpAlert(event)">
+  <div class="mp-alert-box">
+    <span class="mp-alert-icon">⚠️</span>
+    <div class="mp-alert-title">ATENÇÃO</div>
+    <span class="mp-alert-count" id="mpAlertCount">0</span>
+    <div class="mp-alert-sub">fotos abaixo de 12mp detectadas</div>
+    <div class="mp-alert-actions">
+      <button class="mp-alert-upscale" id="mpUpscaleBtn" onclick="upscaleLowMpPhotos()">⬆ REDIMENSIONAR PARA 8064×4536</button>
+      <button class="mp-alert-close" onclick="closeMpAlert()">OK, ENTENDI</button>
+    </div>
+    <div class="mp-upscale-progress" id="mpUpscaleProgress" style="display:none">
+      <div class="mp-upscale-bar-wrap"><div class="mp-upscale-bar" id="mpUpscaleBar"></div></div>
+      <div class="mp-upscale-label" id="mpUpscaleLabel">Processando...</div>
+    </div>
+  </div>
+</div>
+
+<!-- EXPORT OVERLAY -->
+<div class="export-overlay" id="exportOverlay">
+  <div class="export-overlay-box">
+    <div class="export-overlay-title">EXPORTING</div>
+    <div class="export-overlay-sub" id="exportOverlaySub">Preparing photos...</div>
+    <div class="export-progress-bar">
+      <div class="export-progress-fill" id="exportProgressFill"></div>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="script.js"></script>
+</body>
+</html>

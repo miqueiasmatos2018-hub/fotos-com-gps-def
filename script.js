@@ -2854,10 +2854,10 @@ window.alignToSNV = function() {
     });
   });
 
-  const ldInicio = features.find(f => f.name.includes('LD_INICIO_OAE'));
-  const ldFinal  = features.find(f => f.name.includes('LD_FINAL_OAE'));
-  const leInicio = features.find(f => f.name.includes('LE_INICIO_OAE'));
-  const leFinal  = features.find(f => f.name.includes('LE_FINAL_OAE'));
+  const ldInicio = features.find(f => f.name.includes('LD_INICIO'));
+  const ldFinal  = features.find(f => f.name.includes('LD_FINAL'));
+  const leInicio = features.find(f => f.name.includes('LE_INICIO'));
+  const leFinal  = features.find(f => f.name.includes('LE_FINAL'));
 
   // Need at least one LD and one LE point to compute bearing
   const bottomPt = ldInicio?.latlng || ldFinal?.latlng;

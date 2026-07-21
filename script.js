@@ -1724,7 +1724,7 @@ function runDnitLookupForLayer(parsedLayer) {
 }
 
 function loadKmlFile(file, options = {}) {
-  const dotColor = options.color || '#e8ff4d';
+  const dotColor = options.color || '#0000ff';
   const id = 'kml_' + (++kmlIdCounter);
   const shortName = file.name.length > 24 ? file.name.slice(0, 22) + '…' : file.name;
 
@@ -3018,7 +3018,7 @@ window.toggleMeasure = function() {
       try {
         const blob = new Blob([EMBEDDED_KML], { type: 'application/vnd.google-earth.kml+xml' });
         const file = new File([blob], EMBEDDED_KML_NAME);
-        loadKmlFile(file, { color: '#ff6b35', skipDnitLookup: true }); // distinct color, no DNIT lookup for the embedded dataset
+        loadKmlFile(file, { color: '#e8ff4d', skipDnitLookup: true }); // distinct color, no DNIT lookup for the embedded dataset
       } catch(e) {
         console.error('Embedded KML load error:', e);
       }

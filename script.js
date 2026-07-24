@@ -522,10 +522,10 @@ async function handleFiles(fileList) {
     if (!m || !photo.thumbUrl) return;
     const newIcon = L.divIcon({
       className: '',
-      html: `<div class="custom-marker" id="marker-${photo.id}"><img src="${photo.thumbUrl}" alt=""></div>`,
-      iconSize: [36, 36],
-      iconAnchor: [18, 36],
-      popupAnchor: [0, -40]
+      html: `<div class="custom-marker-hitbox"><div class="custom-marker" id="marker-${photo.id}"><img src="${photo.thumbUrl}" alt=""></div></div>`,
+      iconSize: [44, 44],
+      iconAnchor: [22, 44],
+      popupAnchor: [0, -46]
     });
     m.setIcon(newIcon);
   }
@@ -1141,10 +1141,10 @@ function buildMarker(photo) {
   const thumbSrc = photo.thumbUrl || 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
   const icon = L.divIcon({
     className: '',
-    html: `<div class="custom-marker" id="marker-${photo.id}"><img src="${thumbSrc}" alt=""></div>`,
-    iconSize: [36, 36],
-    iconAnchor: [18, 36],
-    popupAnchor: [0, -40]
+    html: `<div class="custom-marker-hitbox"><div class="custom-marker" id="marker-${photo.id}"><img src="${thumbSrc}" alt=""></div></div>`,
+    iconSize: [44, 44],
+    iconAnchor: [22, 44],
+    popupAnchor: [0, -46]
   });
   const marker = L.marker([photo.lat, photo.lng], { icon, bubblingMouseEvents: false });
   marker.bindPopup(() => buildPhotoPopupHtml(photo), {
@@ -2075,6 +2075,20 @@ window.autoLoadKmlFromFolder = async function() {
     if (map.setBearing) {
       try { map.setBearing(_bearing); } catch(e) {}
     }
+
+    // leaflet-rotate + marker-cluster can leave a marker's clickable hit-box
+    // out of sync with where it's visually drawn once the map is tilted —
+    // the drift grows with distance from the map center, so it's worst at
+    // the corners (clicking there hits the map underneath and starts a pan
+    // instead of opening the marker's popup). Forcing each marker to
+    // re-resolve its screen position, and the cluster icons to redraw,
+    // keeps the hit-box aligned with the visible icon after every rotation.
+    requestAnimationFrame(() => {
+      try {
+        Object.values(markers).forEach(m => { if (m.setLatLng) m.setLatLng(m.getLatLng()); });
+        if (clusterGroup && clusterGroup.refreshClusters) clusterGroup.refreshClusters();
+      } catch (e) {}
+    });
   }
 
   // Expose globally so other functions (SNV, etc.) can call it
@@ -2854,10 +2868,10 @@ window.alignToSNV = function() {
     });
   });
 
-  const ldInicio = features.find(f => f.name.includes('LD_INICIO'));
-  const ldFinal  = features.find(f => f.name.includes('LD_FINAL'));
-  const leInicio = features.find(f => f.name.includes('LE_INICIO'));
-  const leFinal  = features.find(f => f.name.includes('LE_FINAL'));
+  const ldInicio = features.find(f => f.name.includes('LD_INICIO_OAE'));
+  const ldFinal  = features.find(f => f.name.includes('LD_FINAL_OAE'));
+  const leInicio = features.find(f => f.name.includes('LE_INICIO_OAE'));
+  const leFinal  = features.find(f => f.name.includes('LE_FINAL_OAE'));
 
   // Need at least one LD and one LE point to compute bearing
   const bottomPt = ldInicio?.latlng || ldFinal?.latlng;
@@ -3018,7 +3032,7 @@ window.toggleMeasure = function() {
       try {
         const blob = new Blob([EMBEDDED_KML], { type: 'application/vnd.google-earth.kml+xml' });
         const file = new File([blob], EMBEDDED_KML_NAME);
-        loadKmlFile(file, { color: '#e8ff4d', skipDnitLookup: true }); // distinct color, no DNIT lookup for the embedded dataset
+        loadKmlFile(file, { color: '#e8ff4d', skipDnitLookup: true }); // embedded dataset color, no DNIT lookup for it
       } catch(e) {
         console.error('Embedded KML load error:', e);
       }

@@ -1783,6 +1783,15 @@
   .map-btn.active { background: rgba(212,245,60,0.15); border-color: var(--accent); color: var(--accent); }
 
   /* CUSTOM MARKER */
+  .custom-marker-hitbox {
+    width: 44px;
+    height: 44px;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    cursor: pointer;
+  }
+
   .custom-marker {
     width: 34px;
     height: 34px;

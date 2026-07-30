@@ -2868,17 +2868,17 @@ window.alignToSNV = function() {
     });
   });
 
-  const ldInicio = features.find(f => f.name.includes('LD_INICIO_OAE'));
-  const ldFinal  = features.find(f => f.name.includes('LD_FINAL_OAE'));
-  const leInicio = features.find(f => f.name.includes('LE_INICIO_OAE'));
-  const leFinal  = features.find(f => f.name.includes('LE_FINAL_OAE'));
+  const ldInicio = features.find(f => f.name.includes('LD_INICIO'));
+  const ldFinal  = features.find(f => f.name.includes('LD_FINAL'));
+  const leInicio = features.find(f => f.name.includes('LE_INICIO'));
+  const leFinal  = features.find(f => f.name.includes('LE_FINAL'));
 
   // Need at least one LD and one LE point to compute bearing
   const bottomPt = ldInicio?.latlng || ldFinal?.latlng;
   const topPt    = leInicio?.latlng || leFinal?.latlng;
 
   if (!bottomPt || !topPt) {
-    const missing = !bottomPt ? 'LD_INICIO_OAE / LD_FINAL_OAE' : 'LE_INICIO_OAE / LE_FINAL_OAE';
+    const missing = !bottomPt ? 'LD_INICIO / LD_FINAL' : 'LE_INICIO / LE_FINAL';
     showToast(`⚠️ Pontos <span class="accent">${missing}</span> não encontrados no KML`);
     return;
   }

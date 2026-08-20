@@ -12,7 +12,11 @@ window.switchTab = function(tab) {
   if (tab !== 'pontos' && typeof _pontoPickingHandler !== 'undefined' && _pontoPickingHandler) {
     window.togglePontoPicking();
   }
-  ['photos','pontos'].forEach(t => {
+  // Cancel route picking if switching away from rotas tab
+  if (tab !== 'rotas' && typeof _routePickingKey !== 'undefined' && _routePickingKey) {
+    window.toggleRoutePicking(_routePickingKey);
+  }
+  ['photos','pontos','rotas'].forEach(t => {
     const btn = document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1));
     const content = document.getElementById('tabContent' + t.charAt(0).toUpperCase() + t.slice(1));
     if (btn)     btn.classList.toggle('active',     t === tab);

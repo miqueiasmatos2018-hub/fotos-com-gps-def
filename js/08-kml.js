@@ -59,6 +59,7 @@ mapContainer.addEventListener('drop', e => {
 
 // ─── DNIT ROUTE LOOKUP (LD_INICIO / LD_INICIO_OAE points) ─────────────────────
 let _dnitRowSeq = 0;
+let _epocaRowSeq = 0;
 
 function getTodayDnitDateParam() {
   const d = new Date();
@@ -123,6 +124,90 @@ function runDnitLookupForLayer(parsedLayer) {
   matches.forEach(m => lookupDnitKm(m.latlng.lat, m.latlng.lng, m.name, m.layer));
 }
 
+// ─── "MELHOR ÉPOCA" LOOKUP (nearest rain station, LD_INICIO points) ────────────
+// Embedded reference dataset of ~2,568 rain-gauge stations (name, coords, and
+// their driest 3-month window). Not shown on the map -- used only to find the
+// closest station to an LD_INICIO/LD_INICIO_OAE point dropped in a KML, so its
+// "best time of year to visit" can be shown under the DNIT km row.
+let ESTACOES_CHUVA = [];
+let _estacoesLoadPromise = null;
+
+function loadEstacoesCsv() {
+  if (_estacoesLoadPromise) return _estacoesLoadPromise; // idempotent, loads once
+  _estacoesLoadPromise = (async () => {
+    try {
+      const res = await fetch('./estacoes_periodo_chuva.csv');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      let text = await res.text();
+      text = text.replace(/^\uFEFF/, ''); // strip UTF-8 BOM
+      const rows = parseCSV(text, ';'); // this file is semicolon-delimited, comma-decimal
+      ESTACOES_CHUVA = rows.map(r => ({
+        name: r.NOME,
+        lat: parseFloat(String(r.LATITUDE).replace(',', '.')),
+        lng: parseFloat(String(r.LONGITUDE).replace(',', '.')),
+        periodo: r.MAIS_SECO
+      })).filter(s => Number.isFinite(s.lat) && Number.isFinite(s.lng));
+      console.log(`[estacoes] ${ESTACOES_CHUVA.length} estações carregadas`);
+    } catch (err) {
+      console.error('Erro ao carregar estacoes_periodo_chuva.csv:', err);
+    }
+  })();
+  return _estacoesLoadPromise;
+}
+
+function _haversineKm(lat1, lng1, lat2, lng2) {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function findNearestEstacao(lat, lng) {
+  if (!ESTACOES_CHUVA.length) return null;
+  let best = null, bestDist = Infinity;
+  for (const s of ESTACOES_CHUVA) {
+    const d = _haversineKm(lat, lng, s.lat, s.lng);
+    if (d < bestDist) { bestDist = d; best = s; }
+  }
+  return best ? { ...best, distanceKm: bestDist } : null;
+}
+
+// Replace the "calculando…" placeholder in a marker's popup with the result.
+function updateEpocaPopupRow(layer, text) {
+  if (!layer || !layer._epocaRowId || !layer.getPopup) return;
+  const popup = layer.getPopup();
+  if (!popup) return;
+  const html = popup.getContent();
+  const re = new RegExp(`(id="${layer._epocaRowId}"[^>]*>\\s*MELHOR ÉPOCA:\\s*<span>)[^<]*(</span>)`);
+  const updated = html.replace(re, `$1${text}$2`);
+  layer.setPopupContent(updated);
+}
+
+async function runEpocaLookupForLayer(parsedLayer) {
+  const matches = [];
+  Object.values(parsedLayer._layers || {}).forEach(l => {
+    const sublayers = l._layers ? Object.values(l._layers) : [l];
+    sublayers.forEach(sl => {
+      const latlng = sl.getLatLng?.() || sl.getBounds?.()?.getCenter?.();
+      if (latlng && sl._epocaRowId) { // rows are only tagged on LD_INICIO / LD_INICIO_OAE points
+        matches.push({ latlng, layer: sl });
+      }
+    });
+  });
+  if (!matches.length) return;
+
+  await loadEstacoesCsv();
+  matches.forEach(m => {
+    const nearest = findNearestEstacao(m.latlng.lat, m.latlng.lng);
+    const text = nearest
+      ? `${nearest.periodo} (${nearest.name}, ${Math.round(nearest.distanceKm)} km)`
+      : 'dados indisponíveis';
+    updateEpocaPopupRow(m.layer, text);
+  });
+}
+
 function buildStyledGeoJsonOptions(dotColor, fields) {
   return {
     style: {
@@ -171,13 +256,17 @@ function buildStyledGeoJsonOptions(dotColor, fields) {
         .map(([k, v]) => `<div class="popup-row">${k}: <span>${v}</span></div>`)
         .join('');
 
-      // LD_INICIO / LD_INICIO_OAE points get an extra row that's filled in
-      // once the DNIT km lookup for this point resolves.
+      // LD_INICIO / LD_INICIO_OAE points get two extra rows that are filled
+      // in once their async lookups resolve: DNIT km, then (under it) the
+      // best/driest three-month window from the nearest rain station.
       const isLdInicio = String(name).toUpperCase().includes('LD_INICIO');
       let dnitRow = '';
+      let epocaRow = '';
       if (isLdInicio) {
         layer._dnitRowId = 'dnitkm-' + (++_dnitRowSeq);
         dnitRow = `<div class="popup-row dnit-km-row" id="${layer._dnitRowId}">DNIT km: <span>consultando…</span></div>`;
+        layer._epocaRowId = 'epoca-' + (++_epocaRowSeq);
+        epocaRow = `<div class="popup-row melhor-epoca-row" id="${layer._epocaRowId}">MELHOR ÉPOCA: <span>calculando…</span></div>`;
       }
 
       layer.bindPopup(`
@@ -187,6 +276,7 @@ function buildStyledGeoJsonOptions(dotColor, fields) {
           ${km ? `<div class="popup-row">Extensão: <span>${km}</span></div>` : ''}
           ${rows}
           ${dnitRow}
+          ${epocaRow}
         </div>
       `, { maxHeight: 280 });
     }
@@ -194,7 +284,8 @@ function buildStyledGeoJsonOptions(dotColor, fields) {
 }
 
 // ─── CSV parsing (RFC4180-ish: handles quoted fields, escaped quotes, commas/newlines inside quotes) ──
-function parseCSV(text) {
+function parseCSV(text, delimiter) {
+  const delim = delimiter || ',';
   const rows = [];
   let row = [];
   let field = '';
@@ -213,7 +304,7 @@ function parseCSV(text) {
     } else {
       if (c === '"') {
         inQuotes = true;
-      } else if (c === ',') {
+      } else if (c === delim) {
         row.push(field); field = '';
       } else if (c === '\r') {
         // skip, \n (or end) will terminate the row
@@ -360,6 +451,13 @@ function loadKmlFile(file, options = {}) {
 
         if (!options.skipDnitLookup) {
           runDnitLookupForLayer(parsed);
+          runEpocaLookupForLayer(parsed);
+        }
+
+        // Scan for LD_INICIO / LD_INICIO_OAE points (yellow reference marker)
+        // and auto-fill both route names from this file's name — see 15-routes.js.
+        if (typeof registerRouteKmlDrop === 'function') {
+          registerRouteKmlDrop(parsed, file.name);
         }
       }, 400);
 

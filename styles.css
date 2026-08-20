@@ -381,6 +381,211 @@
   }
   .ponto-delete:hover { color: #f44336; background: rgba(244,67,54,0.1); }
 
+  /* ROTAS TAB */
+  #tabContentRotas { display: none; flex-direction: column; overflow-y: auto; padding: 10px 12px; gap: 12px; }
+  #tabContentRotas.active { display: flex; }
+
+  .route-panel {
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--route-color, var(--accent));
+    border-radius: 6px;
+    background: rgba(255,255,255,0.02);
+    overflow: hidden;
+  }
+
+  .route-panel-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  .route-panel-header .route-color-dot { margin-top: 3px; }
+  .route-color-dot {
+    width: 9px; height: 9px;
+    border-radius: 50%;
+    background: var(--route-color, var(--accent));
+    box-shadow: 0 0 6px var(--route-color, var(--accent));
+    flex-shrink: 0;
+  }
+  .route-name-compound {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    row-gap: 2px;
+  }
+  .route-name-prefix, .route-name-suffix {
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.3px;
+    color: var(--muted);
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .route-name-input {
+    flex: 1;
+    min-width: 40px;
+    width: 60px;
+    background: none;
+    border: none;
+    outline: none;
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.3px;
+    padding: 2px 3px;
+    border-radius: 3px;
+    transition: background 0.15s;
+  }
+  .route-name-input:focus { background: rgba(255,255,255,0.06); }
+
+  .route-panel-toolbar {
+    display: flex;
+    gap: 6px;
+    padding: 8px 10px;
+  }
+  .route-add-stop-btn { flex: 1; }
+
+  .route-from-green-btn {
+    display: block;
+    width: calc(100% - 20px);
+    margin: 0 10px 8px;
+    background: rgba(0,255,0,0.06);
+    border: 1px dashed rgba(0,255,0,0.35);
+    color: var(--text2);
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.3px;
+    padding: 6px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    text-align: center;
+    transition: all 0.15s;
+  }
+  .route-from-green-btn:hover { color: var(--text); border-color: #00ff00; background: rgba(0,255,0,0.12); }
+  .route-suggest-btn {
+    flex-shrink: 0;
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    border-radius: 4px;
+    padding: 6px 9px;
+    cursor: pointer;
+    font-size: 11px;
+    transition: all 0.15s;
+  }
+  .route-suggest-btn:hover { color: var(--route-color, var(--accent)); border-color: var(--route-color, var(--accent)); background: rgba(255,255,255,0.04); }
+
+  .route-clear-btn {
+    flex-shrink: 0;
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    border-radius: 4px;
+    padding: 6px 9px;
+    cursor: pointer;
+    font-size: 11px;
+    transition: all 0.15s;
+  }
+  .route-clear-btn:hover { color: #f44336; border-color: #f44336; background: rgba(244,67,54,0.08); }
+
+  .route-stops-empty {
+    padding: 14px 10px;
+    text-align: center;
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--border2);
+    letter-spacing: 0.5px;
+  }
+
+  .route-stops-list { max-height: 220px; overflow-y: auto; }
+  .route-stops-list::-webkit-scrollbar { width: 3px; }
+  .route-stops-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .route-stop-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border-top: 1px solid var(--border);
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .route-stop-item:hover { background: rgba(255,255,255,0.03); }
+
+  .route-stop-num {
+    flex-shrink: 0;
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--mono); font-size: 9px; font-weight: 700;
+    color: #0a0a0a;
+  }
+  .route-stop-coords {
+    flex: 1;
+    min-width: 0;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text2);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .route-stop-move, .route-stop-delete {
+    flex-shrink: 0;
+    background: none;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 10px;
+    padding: 2px 5px;
+    border-radius: 3px;
+    transition: color 0.15s, background 0.15s;
+  }
+  .route-stop-move:hover { color: var(--accent); background: rgba(212,245,60,0.1); }
+  .route-stop-move:disabled { opacity: 0.25; cursor: default; }
+  .route-stop-move:disabled:hover { color: var(--muted); background: none; }
+  .route-stop-delete:hover { color: #f44336; background: rgba(244,67,54,0.1); }
+
+  .route-export-btn { flex-shrink: 0; }
+
+  .route-alternatives {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 8px 10px;
+    border-top: 1px solid var(--border);
+  }
+  .route-alt-btn {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border);
+    color: var(--text2);
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.3px;
+    padding: 5px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .route-alt-btn:hover { border-color: var(--route-color, var(--accent)); color: var(--text); }
+  .route-alt-btn.active {
+    background: var(--route-color, var(--accent));
+    border-color: var(--route-color, var(--accent));
+    color: #0a0a0a;
+    font-weight: 700;
+  }
+
+  /* Leaflet Routing Machine draws its own itinerary/turn-by-turn text panel
+     on the map by default -- we use our own sidebar stop list instead, so
+     hide it. The route line + draggable stop markers it also draws stay
+     fully interactive; only this text panel is suppressed. */
+  .leaflet-routing-container { display: none !important; }
+
   /* UPLOAD ZONE */
   /* hidden file input kept for map drag-drop */
   .upload-zone {

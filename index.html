@@ -8,9 +8,11 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.css"/>
 <link rel="stylesheet" href="styles.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<script src="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/leaflet-rotate@0.2.8/dist/leaflet-rotate-src.js"></script>
 <script src="https://api.mapbox.com/mapbox.js/plugins/leaflet-omnivore/v0.3.1/leaflet-omnivore.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/exifr/dist/full.umd.js"></script>
@@ -66,6 +68,7 @@
     <div class="tab-bar">
       <button class="tab-btn active" id="tabPhotos" onclick="switchTab('photos')">📷 FOTOS</button>
       <button class="tab-btn" id="tabPontos" onclick="switchTab('pontos')">📌 Pontos</button>
+      <button class="tab-btn" id="tabRotas" onclick="switchTab('rotas')">🛣 Rotas</button>
     </div>
 
     <div class="tab-content active" id="tabContentPhotos">
@@ -139,6 +142,48 @@
         <div style="font-family:var(--mono);font-size:8px;color:var(--border2);margin-top:4px;">Clique no botão acima ou use a barra de busca</div>
       </div>
       <div class="pontos-list" id="pontosList"></div>
+    </div>
+
+    <div class="tab-content" id="tabContentRotas">
+      <div class="route-panel" id="routePanelA" data-route="a" style="--route-color:#ff0000">
+        <div class="route-panel-header">
+          <span class="route-color-dot"></span>
+          <div class="route-name-compound">
+            <span class="route-name-prefix">ROTA_ALTERNATIVA_</span><input type="text" class="route-name-input" id="routeNameA" value=""
+              spellcheck="false" placeholder="trecho" oninput="renameRoute('a', this.value)"><span class="route-name-suffix" id="routeNameSuffixA">_0.0KM</span>
+          </div>
+        </div>
+        <div class="route-panel-toolbar">
+          <button class="btn-add-ponto route-add-stop-btn" id="btnRouteAddA" onclick="toggleRoutePicking('a')">📍 Clicar no mapa</button>
+          <button class="route-suggest-btn" id="btnRouteSuggestA" onclick="suggestAlternateRoute('a')" title="Sugerir rota alternativa">🔀</button>
+          <button class="route-clear-btn" id="btnRouteClearA" onclick="clearRoute('a')" title="Limpar rota">🗑</button>
+        </div>
+        <button class="route-from-green-btn" id="btnRouteFromGreen" onclick="useGreenRoutePoints()"
+          title="Usa só o início e o fim da Rota Original (verde) e sugere um caminho por estradas diferentes — útil como desvio caso a via original esteja bloqueada">🟢→🔴 Desvio (início/fim da Rota Original)</button>
+        <div class="route-stops-empty" id="routeStopsEmptyA">Nenhuma parada adicionada</div>
+        <div class="route-stops-list" id="routeStopsListA"></div>
+        <div class="route-alternatives" id="routeAlternativesA" style="display:none"></div>
+      </div>
+
+      <div class="route-panel" id="routePanelB" data-route="b" style="--route-color:#00ff00">
+        <div class="route-panel-header">
+          <span class="route-color-dot"></span>
+          <div class="route-name-compound">
+            <span class="route-name-prefix">ROTA_ORIGINAL_</span><input type="text" class="route-name-input" id="routeNameB" value=""
+              spellcheck="false" placeholder="trecho" oninput="renameRoute('b', this.value)"><span class="route-name-suffix" id="routeNameSuffixB">_0.0KM</span>
+          </div>
+        </div>
+        <div class="route-panel-toolbar">
+          <button class="btn-add-ponto route-add-stop-btn" id="btnRouteAddB" onclick="toggleRoutePicking('b')">📍 Clicar no mapa</button>
+          <button class="route-suggest-btn" id="btnRouteSuggestB" onclick="suggestAlternateRoute('b')" title="Sugerir rota alternativa">🔀</button>
+          <button class="route-clear-btn" id="btnRouteClearB" onclick="clearRoute('b')" title="Limpar rota">🗑</button>
+        </div>
+        <div class="route-stops-empty" id="routeStopsEmptyB">Nenhuma parada adicionada</div>
+        <div class="route-stops-list" id="routeStopsListB"></div>
+        <div class="route-alternatives" id="routeAlternativesB" style="display:none"></div>
+      </div>
+
+      <button class="btn-export route-export-btn" id="routeExportBtn" onclick="exportRoutesKML()">⬇ EXPORTAR ROTAS (KML)</button>
     </div>
 
     <div class="export-bar" id="exportBar">
@@ -375,6 +420,7 @@
 <script src="js/12-search-pontos.js"></script>
 <script src="js/13-sorting.js"></script>
 <script src="js/14-tools.js"></script>
-<script src="js/15-boot.js"></script>
+<script src="js/15-routes.js"></script>
+<script src="js/16-boot.js"></script>
 </body>
 </html>

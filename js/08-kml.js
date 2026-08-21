@@ -246,15 +246,22 @@ function buildStyledGeoJsonOptions(dotColor, fields) {
       }
 
       const name = props.name || props.Nome_Tipo_Trecho || props.Codigo_SNV || props.Codigo_BR || '—';
-      const oae  = props.Identificacao_OAE ? `<div style="color:var(--accent);font-size:10px;margin-bottom:4px;">${props.Identificacao_OAE}</div>` : '';
-      const uf   = props.Unidade_Federacao || props.sg_uf || '';
-      const km   = props.Extensao ? `${props.Extensao} km` : '';
 
-      const rows = Object.entries(props)
-        .filter(([k, v]) => v && k !== 'description' && k !== 'styleUrl')
-        .slice(0, 10)
-        .map(([k, v]) => `<div class="popup-row">${k}: <span>${v}</span></div>`)
-        .join('');
+      // Only these fields are wanted from a dropped KML -- everything else
+      // in the file is ignored. LAT/LONG come from the feature's own
+      // geometry (authoritative) rather than from properties, which may be
+      // absent or formatted inconsistently between files. Points expose
+      // getLatLng; lines/polygons don't, so fall back to their centre so
+      // those features still show a coordinate instead of nothing.
+      const latlng = layer.getLatLng ? layer.getLatLng()
+                   : (layer.getBounds ? layer.getBounds().getCenter() : null);
+      const hGeo = props.H_GEO ?? props.h_geo ?? props.H_Geo ?? props.HGEO ?? null;
+
+      const rows = [
+        latlng ? `<div class="popup-row">LAT: <span>${latlng.lat.toFixed(8)}</span></div>` : '',
+        latlng ? `<div class="popup-row">LONG: <span>${latlng.lng.toFixed(8)}</span></div>` : '',
+        (hGeo !== null && hGeo !== '') ? `<div class="popup-row">H_GEO: <span>${hGeo}</span></div>` : ''
+      ].join('');
 
       // LD_INICIO / LD_INICIO_OAE points get two extra rows that are filled
       // in once their async lookups resolve: DNIT km, then (under it) the
@@ -271,9 +278,7 @@ function buildStyledGeoJsonOptions(dotColor, fields) {
 
       layer.bindPopup(`
         <div class="popup-content">
-          <div class="popup-name">${name}${uf ? ' · ' + uf : ''}</div>
-          ${oae}
-          ${km ? `<div class="popup-row">Extensão: <span>${km}</span></div>` : ''}
+          <div class="popup-name">${name}</div>
           ${rows}
           ${dnitRow}
           ${epocaRow}

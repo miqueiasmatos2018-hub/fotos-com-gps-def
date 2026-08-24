@@ -9,9 +9,11 @@
 
 function updateStats() {
   const withGPS = photos.filter(p => p.lat != null).length;
-  document.getElementById('statTotal').textContent = photos.length;
-  document.getElementById('statGPS').textContent = withGPS;
-  document.getElementById('statNoGPS').textContent = photos.length - withGPS;
+  // Uses the refs cached in 04-photos.js rather than re-querying the DOM --
+  // this runs on every photo add/remove.
+  if (_elStatTotal) _elStatTotal.textContent = photos.length;
+  if (_elStatGPS)   _elStatGPS.textContent   = withGPS;
+  if (_elStatNoGPS) _elStatNoGPS.textContent = photos.length - withGPS;
 }
 
 window.fitAll = function() {

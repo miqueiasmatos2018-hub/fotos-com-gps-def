@@ -145,7 +145,6 @@ function syncMarkerLayerMode(rotated) {
     if (all.length) clusterGroup.addLayers(all);
   }
 }
-window._syncMarkerLayerMode = syncMarkerLayerMode;
 
 // Spiderfy cluster on hover so overlapping markers spread apart
 let _spiderfyTimer = null;

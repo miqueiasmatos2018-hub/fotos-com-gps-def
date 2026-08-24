@@ -67,7 +67,82 @@ async function _fetchOsrmHighwayFraction(points) {
   }
 }
 
-// Each route's exported/displayed name is built as:
+// Pulls the highway code (e.g. "BR-174", "RR-342") out of a road name/ref,
+// normalised to uppercase with a single hyphen, so "br 174" and "BR-174"
+// collapse to the same token.
+function _extractHighwayCode(text) {
+  if (!text) return null;
+  const m = String(text).match(HIGHWAY_REF_RE);
+  if (!m) return null;
+  return m[0].toUpperCase().replace(/[-\s]+/, '-');
+}
+
+// Ordered list of the highways a route travels, in the order they're used —
+// e.g. ["BR-174", "RR-342", "RR-203", "BR-174"]. Only *consecutive*
+// duplicates are collapsed, so a route that leaves BR-174 and later rejoins
+// it correctly shows BR-174 twice (which is the normal shape here, since
+// these routes start and end on the same BR).
+function _highwaySequenceFromRoute(osrmRoute) {
+  if (!osrmRoute || !osrmRoute.legs) return [];
+  const seq = [];
+  for (const leg of osrmRoute.legs) {
+    for (const step of (leg.steps || [])) {
+      // OSRM puts the highway designation in `ref` on some roads and only
+      // in `name` on others, so check both.
+      const code = _extractHighwayCode(step.ref) || _extractHighwayCode(step.name);
+      if (!code) continue;
+      if (seq.length === 0 || seq[seq.length - 1] !== code) seq.push(code);
+    }
+  }
+  return seq;
+}
+
+// Fetches a route and returns both its total distance and the ordered
+// sequence of highways it uses, for the exported description.
+async function _fetchRouteDescription(points) {
+  const coordStr = points.map(p => `${p.lng},${p.lat}`).join(';');
+  const url = `${OSRM_SERVICE_URL}/driving/${coordStr}?overview=false&steps=true`;
+  try {
+    const res = await fetch(url);
+    const data = await res.json();
+    const rt = data.routes && data.routes[0];
+    if (!rt) return null;
+    return {
+      distanceKm: rt.distance / 1000,
+      highways: _highwaySequenceFromRoute(rt)
+    };
+  } catch (err) {
+    console.error('OSRM route-description fetch failed:', err);
+    return null;
+  }
+}
+
+// Debounced per-route wrapper around the highway check above. Only warns
+// when the fraction is genuinely known and below the threshold, and only
+// once the route has settled (see the call site in _rebuildRouteControl).
+const _highwayCheckDebounced = {
+  a: debounce(() => _runHighwayCheck('a'), 700),
+  b: debounce(() => _runHighwayCheck('b'), 700)
+};
+
+function _scheduleHighwayCheck(key) {
+  const fn = _highwayCheckDebounced[key];
+  if (fn) fn();
+}
+
+async function _runHighwayCheck(key) {
+  const r = ROUTES[key];
+  if (!r || !r.waypoints || r.waypoints.length < 2) return;
+  const frac = await _fetchOsrmHighwayFraction(r.waypoints);
+  if (frac == null) return;
+  r.highwayFraction = frac;
+  if (frac < HIGHWAY_FRACTION_MIN) {
+    const pct = Math.round(frac * 100);
+    showToast(`⚠ ${_composeRouteName(key)}: apenas <span class="accent">${pct}%</span> do trajeto está em vias federais/estaduais`);
+  }
+}
+
+
 //   PREFIX + "_" + <editable middle, optional> + "_" + <distance>KM
 // The prefix is fixed per route; the distance suffix is recalculated live
 // as the route is drawn/edited.
@@ -110,9 +185,18 @@ function _extractLdInicioPointsFromKml(parsedLayer) {
 //     BOTH route names.
 function registerRouteKmlDrop(parsedLayer, fileName) {
   const points = _extractLdInicioPointsFromKml(parsedLayer);
-  points.forEach(p => LD_INICIO_POINTS.push({ lat: p.lat, lng: p.lng }));
-  if (points.length) {
-    showToast(`📍 <span class="accent">${points.length}</span> ponto${points.length > 1 ? 's' : ''} LD_INICIO_OAE identificado${points.length > 1 ? 's' : ''}`);
+
+  // De-duplicate: dropping the same KML twice (or re-dropping a corrected
+  // version) would otherwise stack identical points and emit each of them
+  // repeatedly in the exported KML.
+  let added = 0;
+  for (const p of points) {
+    const dup = LD_INICIO_POINTS.some(e =>
+      Math.abs(e.lat - p.lat) < 1e-7 && Math.abs(e.lng - p.lng) < 1e-7);
+    if (!dup) { LD_INICIO_POINTS.push({ lat: p.lat, lng: p.lng }); added++; }
+  }
+  if (added) {
+    showToast(`📍 <span class="accent">${added}</span> ponto${added > 1 ? 's' : ''} LD_INICIO_OAE identificado${added > 1 ? 's' : ''}`);
   }
 
   const base = fileName.replace(/\.(kml|kmz)$/i, '');
@@ -202,14 +286,10 @@ function _rebuildRouteControl(key) {
 
     // Best-effort highway check (see the note at the top of this file on
     // why this can only warn, not force the routing engine itself).
-    _fetchOsrmHighwayFraction(r.waypoints).then(frac => {
-      if (frac == null) return;
-      r.highwayFraction = frac;
-      if (frac < HIGHWAY_FRACTION_MIN) {
-        const pct = Math.round(frac * 100);
-        showToast(`⚠ ${_composeRouteName(key)}: apenas <span class="accent">${pct}%</span> do trajeto está em vias federais/estaduais`);
-      }
-    });
+    // Debounced: routeWhileDragging makes 'routesfound' fire continuously
+    // while a stop is being dragged, and firing an extra OSRM request per
+    // frame would hammer the rate-limited public server (and spam toasts).
+    _scheduleHighwayCheck(key);
   });
 
   r.control.on('routingerror', () => {
@@ -224,6 +304,15 @@ function _rebuildRouteControl(key) {
 // preview of that alternate path so it's visible on the map too.
 function _applySelectedRoute(key) {
   const r = ROUTES[key];
+
+  // Clear any previous dashed preview first -- doing this before the
+  // early-return below matters, otherwise a stale preview from a previous
+  // selection stays stranded on the map when the new one has no geometry.
+  if (r.previewLine) {
+    map.removeLayer(r.previewLine);
+    r.previewLine = null;
+  }
+
   const chosen = r.allRoutes && r.allRoutes[r.selectedRouteIdx];
   if (!chosen || !chosen.coordinates) return;
 
@@ -233,10 +322,6 @@ function _applySelectedRoute(key) {
     _updateRouteSuffixDisplay(key);
   }
 
-  if (r.previewLine) {
-    map.removeLayer(r.previewLine);
-    r.previewLine = null;
-  }
   if (r.selectedRouteIdx !== 0) {
     r.previewLine = L.polyline(
       r.roadCoords.map(c => [c.lat, c.lng]),
@@ -639,9 +724,85 @@ ${routePlacemarks}${routePlacemarks && ldPlacemarks ? '\n' : ''}${ldPlacemarks}
 </kml>
 `;
 
-  triggerDownload(new Blob([kml], { type: 'application/vnd.google-earth.kml+xml' }), 'rotas.kml');
+  // Exported filename: ROTA_ALTERNATIVA_<nome do KML solto no mapa>.kml
+  // nameMiddle is filled in by registerRouteKmlDrop() when a KML is dropped;
+  // if nothing has been dropped yet it falls back to a plain name so the
+  // download still works.
+  const middle = (ROUTES.a.nameMiddle || '').trim();
+  const safeMiddle = middle.replace(/[\\/:*?"<>|]/g, '_'); // strip chars illegal in filenames
+  const fileName = safeMiddle ? `ROTA_ALTERNATIVA_${safeMiddle}.kml` : 'ROTA_ALTERNATIVA.kml';
+
+  triggerDownload(new Blob([kml], { type: 'application/vnd.google-earth.kml+xml' }), fileName);
   const parts = [];
   if (ready.length) parts.push(`${ready.length} rota${ready.length > 1 ? 's' : ''}`);
   if (LD_INICIO_POINTS.length) parts.push(`${LD_INICIO_POINTS.length} ponto${LD_INICIO_POINTS.length > 1 ? 's' : ''} LD_INICIO_OAE`);
   showToast(`⬇ <span class="accent">${parts.join(' + ')}</span> exportado(s)`);
+};
+
+// ─── TXT REPORT EXPORT ────────────────────────────────────────────────────────
+// Exports a plain-text summary: the distance of each route, the difference
+// between them, and a description of each route as the ordered sequence of
+// highways it travels (e.g. "BR-174; RR-342; RR-203; BR-174").
+window.exportRoutesTXT = async function() {
+  const a = ROUTES.a; // vermelha / ROTA_ALTERNATIVA
+  const b = ROUTES.b; // verde    / ROTA_ORIGINAL
+
+  const haveA = a.waypoints && a.waypoints.length >= 2;
+  const haveB = b.waypoints && b.waypoints.length >= 2;
+  if (!haveA && !haveB) {
+    showToast('Crie ao menos uma rota antes de exportar o relatório');
+    return;
+  }
+
+  showToast('📝 Gerando relatório…');
+
+  const [descA, descB] = await Promise.all([
+    haveA ? _fetchRouteDescription(a.waypoints) : Promise.resolve(null),
+    haveB ? _fetchRouteDescription(b.waypoints) : Promise.resolve(null)
+  ]);
+
+  // Prefer the freshly-fetched distance; fall back to the one already stored
+  // on the route if the request failed, so the report still has numbers.
+  const kmA = descA ? descA.distanceKm : (haveA ? a.distanceKm : null);
+  const kmB = descB ? descB.distanceKm : (haveB ? b.distanceKm : null);
+
+  const fmtKm  = v => v != null ? `${v.toFixed(1)} KM` : '—';
+  const fmtSeq = d => (d && d.highways.length) ? d.highways.join('; ') : '—';
+
+  const lines = [];
+  lines.push('RELATORIO DE ROTAS');
+  lines.push('='.repeat(60));
+  lines.push('');
+
+  if (haveB) {
+    lines.push(`${_composeRouteName('b')}`);
+    lines.push(`  Extensao...: ${fmtKm(kmB)}`);
+    lines.push(`  Trajeto....: ${fmtSeq(descB)}`);
+    lines.push('');
+  }
+  if (haveA) {
+    lines.push(`${_composeRouteName('a')}`);
+    lines.push(`  Extensao...: ${fmtKm(kmA)}`);
+    lines.push(`  Trajeto....: ${fmtSeq(descA)}`);
+    lines.push('');
+  }
+
+  if (kmA != null && kmB != null) {
+    const diff = kmA - kmB;
+    const sign = diff >= 0 ? '+' : '-';
+    lines.push('-'.repeat(60));
+    lines.push(`DIFERENCA: ${sign}${Math.abs(diff).toFixed(1)} KM`);
+    lines.push(`  (${_composeRouteName('a')} em relacao a ${_composeRouteName('b')})`);
+  } else {
+    lines.push('-'.repeat(60));
+    lines.push('DIFERENCA: indisponivel (crie as duas rotas para comparar)');
+  }
+  lines.push('');
+
+  const middle = (a.nameMiddle || b.nameMiddle || '').trim();
+  const safeMiddle = middle.replace(/[\\/:*?"<>|]/g, '_');
+  const fileName = safeMiddle ? `ROTA_ALTERNATIVA_${safeMiddle}.txt` : 'ROTA_ALTERNATIVA.txt';
+
+  triggerDownload(new Blob([lines.join('\r\n')], { type: 'text/plain;charset=utf-8' }), fileName);
+  showToast(`⬇ Relatório <span class="accent">${fileName}</span> exportado`);
 };

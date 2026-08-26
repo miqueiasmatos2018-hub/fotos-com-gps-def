@@ -185,8 +185,17 @@
         <div class="route-alternatives" id="routeAlternativesB" style="display:none"></div>
       </div>
 
+      <div class="route-result-row">
+        <span class="route-result-label">TRAJETO:</span>
+        <span class="route-result-value" id="routeTrajetoValue">—</span>
+        <button class="route-result-copy" id="routeCopyTrajetoBtn" onclick="copyRouteTrajeto()" title="Copiar trajeto">Copiar</button>
+      </div>
+      <div class="route-result-row">
+        <span class="route-result-label">DIFERENÇA (KM):</span>
+        <span class="route-result-value" id="routeDiffValue">—</span>
+        <button class="route-result-copy" id="routeCopyDiffBtn" onclick="copyRouteDiffKm()" title="Copiar diferença">Copiar</button>
+      </div>
       <button class="btn-export route-export-btn" id="routeExportBtn" onclick="exportRoutesKML()">⬇ EXPORTAR ROTAS (KML)</button>
-      <button class="btn-export route-export-btn" id="routeExportTxtBtn" onclick="exportRoutesTXT()">⬇ EXPORTAR RELATÓRIO (TXT)</button>
     </div>
 
     <div class="tab-content" id="tabContentMedidas">

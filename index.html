@@ -28,6 +28,14 @@
       <span class="logo-sub">Automations</span>
     </div>
   </div>
+  <nav class="top-tabs" id="topTabs">
+    <button class="top-tab-btn active" id="tabPhotos" onclick="switchTab('photos')"><span class="top-tab-icon">📷</span>Fotos</button>
+    <button class="top-tab-btn" id="tabPontos" onclick="switchTab('pontos')"><span class="top-tab-icon">📌</span>Pontos</button>
+    <button class="top-tab-btn" id="tabRotas" onclick="switchTab('rotas')"><span class="top-tab-icon">🛣</span>Rotas</button>
+    <button class="top-tab-btn" id="tabMedidas" onclick="switchTab('medidas')"><span class="top-tab-icon">📏</span>Medidas</button>
+    <button class="top-tab-btn" id="tabElementos" onclick="switchTab('elementos')"><span class="top-tab-icon">🧱</span>Elementos</button>
+    <button class="top-tab-btn" id="tabNomes" onclick="switchTab('nomes')"><span class="top-tab-icon">🏷</span>Nomes</button>
+  </nav>
   <div class="header-meta">
     Photo Metadata Explorer<br>
     GPS · EXIF · Location
@@ -63,12 +71,6 @@
         <span class="stat-val" id="statNoGPS">0</span>
         SEM GPS
       </div>
-    </div>
-
-    <div class="tab-bar">
-      <button class="tab-btn active" id="tabPhotos" onclick="switchTab('photos')">📷 FOTOS</button>
-      <button class="tab-btn" id="tabPontos" onclick="switchTab('pontos')">📌 Pontos</button>
-      <button class="tab-btn" id="tabRotas" onclick="switchTab('rotas')">🛣 Rotas</button>
     </div>
 
     <div class="tab-content active" id="tabContentPhotos">
@@ -185,6 +187,196 @@
 
       <button class="btn-export route-export-btn" id="routeExportBtn" onclick="exportRoutesKML()">⬇ EXPORTAR ROTAS (KML)</button>
       <button class="btn-export route-export-btn" id="routeExportTxtBtn" onclick="exportRoutesTXT()">⬇ EXPORTAR RELATÓRIO (TXT)</button>
+    </div>
+
+    <div class="tab-content" id="tabContentMedidas">
+      <div class="medidas-intro">Solte um KML com pontos <b>LD_INICIO_OAE</b>, <b>LE_INICIO_OAE</b>, <b>LD_FINAL_OAE</b> e <b>LE_FINAL_OAE</b> (ou as variações "PONTE") para calcular a estrutura.</div>
+      <div class="medidas-empty" id="medidasEmpty">Nenhuma estrutura identificada ainda</div>
+      <div class="medidas-list" id="medidasList"></div>
+    </div>
+
+    <div class="tab-content" id="tabContentElementos">
+      <div class="elem-titleblock">
+        <div>
+          <p class="elem-eyebrow">Sistema · Leitura de arquivo CSV</p>
+          <h2 class="elem-h1">Leitor de Elementos SGE</h2>
+          <p class="elem-subtitle">Organiza por tramo e categoria estrutural, agrupando por código de tipo (ID) e nome — pronto para copiar as dimensões direto para a planilha.</p>
+        </div>
+        <div class="elem-tb-meta">
+          REF <b id="elemMetaFile">—</b><br>
+          ELEM <b id="elemMetaElems">0</b> · TIPOS <b id="elemMetaTypes">0</b>
+        </div>
+      </div>
+
+      <div class="elem-dropzone" id="elemDropzone">
+        <div class="elem-dz-left">
+          <div class="elem-dz-icon">＋</div>
+          <div class="elem-dz-text">
+            <b>Arraste um arquivo .csv aqui, em qualquer lugar desta área</b>
+            <span>Exportação padrão SGE/DNIT (separador ";", decimal ",")</span>
+          </div>
+        </div>
+        <div class="elem-dz-buttons">
+          <button class="elem-btn" id="elemBtnSample" type="button">Carregar exemplo</button>
+          <button class="elem-btn primary" id="elemBtnChoose" type="button">Escolher arquivo</button>
+        </div>
+        <input type="file" id="elemFileInput" accept=".csv,text/csv" style="display:none">
+      </div>
+
+      <div class="elem-toolbar" id="elemToolbar" style="display:none;">
+        <div class="elem-stats">
+          <div class="elem-stat"><b id="elemStatElems">0</b><span>elementos</span></div>
+          <div class="elem-stat"><b id="elemStatTypes">0</b><span>tipos (nome+id)</span></div>
+          <div class="elem-stat"><b id="elemStatGroupsShown">0</b><span>grupos exibidos</span></div>
+        </div>
+        <div class="elem-controls">
+          <input class="elem-search" id="elemSearch" type="text" placeholder="Filtrar por nome do tipo…">
+          <button class="elem-btn" id="elemBtnToggleAll" type="button">Expandir tudo</button>
+        </div>
+      </div>
+
+      <div id="elemGroups"></div>
+      <div class="elem-empty-state" id="elemEmptyState">
+        <div class="big">Nenhum arquivo carregado ainda</div>
+        envie um .csv exportado do SGE para começar
+      </div>
+    </div>
+
+    <div class="tab-content" id="tabContentNomes">
+      <div class="nomes-titleblock">
+        <div class="nomes-tb-corner-tr"></div><div class="nomes-tb-corner-br"></div>
+        <div>
+          <p class="nomes-eyebrow">Sistema · Nomenclatura de fotos</p>
+          <h2 class="nomes-h1">Gerador de Nomes de Fotos</h2>
+          <p class="nomes-subtitle">Monta os nomes padronizados das fotos de inspeção de uma OAE — fotos superiores (fixas, via diagrama) e fotos inferiores (configuráveis) — prontos para copiar direto para o arquivo de fotos.</p>
+        </div>
+      </div>
+
+      <div class="nomes-section">
+        <div class="nomes-section-head">
+          <h2>Fotos Superiores</h2>
+          <span class="nomes-section-count" id="nomesStaticNamesCount"></span>
+        </div>
+        <div class="nomes-controls" style="margin-bottom:12px;">
+          <button class="nomes-btn" id="nomesBtnCopyAllStatic" type="button">Copiar tudo</button>
+          <button class="nomes-btn" id="nomesBtnUnmarkStatic" type="button">Desmarcar copiadas</button>
+        </div>
+
+        <div class="nomes-oae-diagram-wrap">
+          <svg id="nomesStaticDiagram" class="nomes-oae-diagram" viewBox="0 0 560 360" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <marker id="nomesOaeArrowhead" markerWidth="7" markerHeight="7" refX="5" refY="3.5" orient="auto">
+                <path d="M0,0 L7,3.5 L0,7 Z" class="nomes-diagram-arrowhead" fill="var(--accent)"></path>
+              </marker>
+            </defs>
+
+            <rect class="nomes-diagram-rect" x="140" y="110" width="280" height="140" fill="none" stroke="var(--border2)" stroke-width="2"></rect>
+
+            <line class="nomes-diagram-arrow" x1="110" y1="66" x2="138" y2="108" stroke="var(--accent)" stroke-width="2" marker-end="url(#nomesOaeArrowhead)"></line>
+            <line class="nomes-diagram-arrow" x1="280" y1="64" x2="280" y2="108" stroke="var(--accent)" stroke-width="2" marker-end="url(#nomesOaeArrowhead)"></line>
+            <line class="nomes-diagram-arrow" x1="450" y1="66" x2="422" y2="108" stroke="var(--accent)" stroke-width="2" marker-end="url(#nomesOaeArrowhead)"></line>
+            <line class="nomes-diagram-arrow" x1="467" y1="180" x2="423" y2="180" stroke="var(--accent)" stroke-width="2" marker-end="url(#nomesOaeArrowhead)"></line>
+            <line class="nomes-diagram-arrow" x1="450" y1="294" x2="422" y2="252" stroke="var(--accent)" stroke-width="2" marker-end="url(#nomesOaeArrowhead)"></line>
+            <line class="nomes-diagram-arrow" x1="280" y1="296" x2="280" y2="252" stroke="var(--accent)" stroke-width="2" marker-end="url(#nomesOaeArrowhead)"></line>
+            <line class="nomes-diagram-arrow" x1="110" y1="294" x2="138" y2="252" stroke="var(--accent)" stroke-width="2" marker-end="url(#nomesOaeArrowhead)"></line>
+            <line class="nomes-diagram-arrow" x1="93" y1="180" x2="133" y2="180" stroke="var(--accent)" stroke-width="2" marker-end="url(#nomesOaeArrowhead)"></line>
+            <line class="nomes-diagram-arrow" x1="203" y1="180" x2="238" y2="180" stroke="var(--accent)" stroke-width="2" marker-end="url(#nomesOaeArrowhead)"></line>
+            <line class="nomes-diagram-arrow" x1="357" y1="180" x2="322" y2="180" stroke="var(--accent)" stroke-width="2" marker-end="url(#nomesOaeArrowhead)"></line>
+
+            <g class="nomes-diagram-badge" data-index="0" role="button" tabindex="0" aria-label="Copiar nome 01">
+              <title>LE INICIO, DIAGONAL SUPERIOR</title>
+              <circle class="nomes-diagram-badge-circle" cx="95" cy="52" r="17"></circle>
+              <text class="nomes-diagram-badge-text" x="95" y="52" dy="0.35em">01</text>
+            </g>
+            <g class="nomes-diagram-badge" data-index="1" role="button" tabindex="0" aria-label="Copiar nome 02">
+              <title>LE LATERAL, SUPERIOR</title>
+              <circle class="nomes-diagram-badge-circle" cx="280" cy="45" r="17"></circle>
+              <text class="nomes-diagram-badge-text" x="280" y="45" dy="0.35em">02</text>
+            </g>
+            <g class="nomes-diagram-badge" data-index="2" role="button" tabindex="0" aria-label="Copiar nome 03">
+              <title>LE FINAL, DIAGONAL SUPERIOR</title>
+              <circle class="nomes-diagram-badge-circle" cx="465" cy="52" r="17"></circle>
+              <text class="nomes-diagram-badge-text" x="465" y="52" dy="0.35em">03</text>
+            </g>
+            <g class="nomes-diagram-badge" data-index="3" role="button" tabindex="0" aria-label="Copiar nome 04">
+              <title>DECRESCENTE SUPERIOR</title>
+              <circle class="nomes-diagram-badge-circle" cx="485" cy="180" r="17"></circle>
+              <text class="nomes-diagram-badge-text" x="485" y="180" dy="0.35em">04</text>
+            </g>
+            <g class="nomes-diagram-badge" data-index="4" role="button" tabindex="0" aria-label="Copiar nome 05">
+              <title>LD FINAL, DIAGONAL SUPERIOR</title>
+              <circle class="nomes-diagram-badge-circle" cx="465" cy="308" r="17"></circle>
+              <text class="nomes-diagram-badge-text" x="465" y="308" dy="0.35em">05</text>
+            </g>
+            <g class="nomes-diagram-badge" data-index="5" role="button" tabindex="0" aria-label="Copiar nome 06">
+              <title>LD LATERAL, SUPERIOR</title>
+              <circle class="nomes-diagram-badge-circle" cx="280" cy="315" r="17"></circle>
+              <text class="nomes-diagram-badge-text" x="280" y="315" dy="0.35em">06</text>
+            </g>
+            <g class="nomes-diagram-badge" data-index="6" role="button" tabindex="0" aria-label="Copiar nome 07">
+              <title>LD INICIO, DIAGONAL SUPERIOR</title>
+              <circle class="nomes-diagram-badge-circle" cx="95" cy="308" r="17"></circle>
+              <text class="nomes-diagram-badge-text" x="95" y="308" dy="0.35em">07</text>
+            </g>
+            <g class="nomes-diagram-badge" data-index="7" role="button" tabindex="0" aria-label="Copiar nome 08">
+              <title>CRESCENTE SUPERIOR</title>
+              <circle class="nomes-diagram-badge-circle" cx="75" cy="180" r="17"></circle>
+              <text class="nomes-diagram-badge-text" x="75" y="180" dy="0.35em">08</text>
+            </g>
+            <g class="nomes-diagram-badge" data-index="9" role="button" tabindex="0" aria-label="Copiar nome 10">
+              <title>VISTA TERREA SENTIDO CRESCENTE</title>
+              <circle class="nomes-diagram-badge-circle" cx="185" cy="180" r="17"></circle>
+              <text class="nomes-diagram-badge-text" x="185" y="180" dy="0.35em">10</text>
+            </g>
+            <g class="nomes-diagram-badge" data-index="8" role="button" tabindex="0" aria-label="Copiar nome 09">
+              <title>SUPERIOR ORTOGONAL</title>
+              <circle class="nomes-diagram-badge-circle" cx="280" cy="180" r="17"></circle>
+              <text class="nomes-diagram-badge-text" x="280" y="180" dy="0.35em">09</text>
+            </g>
+            <g class="nomes-diagram-badge" data-index="10" role="button" tabindex="0" aria-label="Copiar nome 11">
+              <title>VISTA TERREA SENTIDO DECRESCENTE</title>
+              <circle class="nomes-diagram-badge-circle" cx="375" cy="180" r="17"></circle>
+              <text class="nomes-diagram-badge-text" x="375" y="180" dy="0.35em">11</text>
+            </g>
+          </svg>
+        </div>
+      </div>
+
+      <div class="nomes-section">
+        <div class="nomes-section-head">
+          <h2>Fotos Inferiores</h2>
+          <span class="nomes-section-count" id="nomesNamesCount"></span>
+        </div>
+
+        <div class="nomes-inf-controls-row">
+          <div class="nomes-numbering-row">
+            <label class="nomes-numbering-label" for="nomesStartNumber">Numeração inicial</label>
+            <input type="number" id="nomesStartNumber" class="nomes-num-input" min="1" value="12">
+          </div>
+          <div class="nomes-numbering-row">
+            <label class="nomes-numbering-label" for="nomesTramoCount">Quantidade de tramos</label>
+            <select class="nomes-num-input" id="nomesTramoCount"></select>
+          </div>
+        </div>
+
+        <p class="nomes-inf-hint">Clique nos círculos vazios para gerar o nome daquele ponto, na ordem que preferir — só os pontos clicados entram na lista.</p>
+
+        <div class="nomes-inf-diagrams" id="nomesInfDiagrams"></div>
+
+        <div class="nomes-toolbar" id="nomesNamesToolbar">
+          <div class="nomes-controls">
+            <button class="nomes-btn" id="nomesBtnCopyAllNames" type="button">Copiar tudo</button>
+            <button class="nomes-btn" id="nomesBtnUnmarkNames" type="button">Desmarcar copiados</button>
+            <button class="nomes-btn" id="nomesBtnClearNames" type="button">Limpar tudo</button>
+          </div>
+        </div>
+
+        <div class="nomes-name-list" id="nomesNamesList"></div>
+        <div class="nomes-empty-state" id="nomesNamesEmptyState">
+          <div class="nomes-big">Nenhum nome gerado ainda</div>
+          clique em um dos pontos do diagrama acima
+        </div>
+      </div>
     </div>
 
     <div class="export-bar" id="exportBar">
@@ -422,6 +614,9 @@
 <script src="js/13-sorting.js"></script>
 <script src="js/14-tools.js"></script>
 <script src="js/15-routes.js"></script>
-<script src="js/16-boot.js"></script>
+<script src="js/16-medidas.js"></script>
+<script src="js/17-elementos.js"></script>
+<script src="js/18-nomes.js"></script>
+<script src="js/19-boot.js"></script>
 </body>
 </html>

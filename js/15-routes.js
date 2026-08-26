@@ -240,6 +240,7 @@ function _rebuildRouteControl(key) {
     r.selectedRouteIdx = 0;
     _updateRouteSuffixDisplay(key);
     _renderRouteAlternatives(key);
+    _updateRouteResults();
     return;
   }
 
@@ -290,6 +291,10 @@ function _rebuildRouteControl(key) {
     // while a stop is being dragged, and firing an extra OSRM request per
     // frame would hammer the rate-limited public server (and spam toasts).
     _scheduleHighwayCheck(key);
+
+    // Keep the TRAJETO: / DIFERENÇA (KM): rows current too (same debounce
+    // reasoning as above).
+    _scheduleRouteResultsUpdate();
   });
 
   r.control.on('routingerror', () => {
@@ -622,8 +627,49 @@ window.clearRoute = function(key) {
   _updateRouteSuffixDisplay(key);
   _renderRouteStops(key);
   _renderRouteAlternatives(key);
+  _updateRouteResults();
   showToast(`${label} <span class="accent">limpa</span>`);
 };
+
+// ─── PROXIMITY-BASED STOP INSERTION ────────────────────────────────────────────
+// When a new stop is added by clicking the map, insert it wherever along the
+// existing sequence it adds the least extra distance -- rather than always
+// tacking it onto the end -- so a point dropped near the middle of a route
+// lands between the two stops it's actually between, keeping the route in a
+// sensible driving order without the person having to manually reorder it
+// afterward (via the ▲▼ buttons in the stop list).
+function _insertWaypointByProximity(waypoints, point) {
+  // Nothing to compare against yet -- just append.
+  if (waypoints.length < 2) {
+    waypoints.push(point);
+    return;
+  }
+
+  const first = waypoints[0];
+  const last  = waypoints[waypoints.length - 1];
+
+  // Extending the route before the first stop or after the last one only
+  // adds the one new leg (no existing leg is being replaced).
+  let bestIdx  = 0;
+  let bestCost = _haversineKm(point.lat, point.lng, first.lat, first.lng);
+
+  const appendCost = _haversineKm(last.lat, last.lng, point.lat, point.lng);
+  if (appendCost < bestCost) { bestCost = appendCost; bestIdx = waypoints.length; }
+
+  // Inserting between two existing consecutive stops replaces their direct
+  // leg with two legs via the new point -- the extra distance that costs is
+  // what actually measures "does this point belong between these two".
+  for (let i = 0; i < waypoints.length - 1; i++) {
+    const w1 = waypoints[i], w2 = waypoints[i + 1];
+    const direct = _haversineKm(w1.lat, w1.lng, w2.lat, w2.lng);
+    const viaPoint = _haversineKm(w1.lat, w1.lng, point.lat, point.lng) +
+                      _haversineKm(point.lat, point.lng, w2.lat, w2.lng);
+    const cost = viaPoint - direct;
+    if (cost < bestCost) { bestCost = cost; bestIdx = i + 1; }
+  }
+
+  waypoints.splice(bestIdx, 0, point);
+}
 
 // ─── CLICK-MAP-TO-ADD-STOP ────────────────────────────────────────────────────
 let _routePickingKey  = null;
@@ -665,7 +711,7 @@ window.toggleRoutePicking = function(key) {
   map.getContainer().style.cursor = 'crosshair';
 
   _routePickingClick = e => {
-    r.waypoints.push({ lat: e.latlng.lat, lng: e.latlng.lng });
+    _insertWaypointByProximity(r.waypoints, { lat: e.latlng.lat, lng: e.latlng.lng });
     _rebuildRouteControl(key);
     _renderRouteStops(key);
   };
@@ -739,70 +785,112 @@ ${routePlacemarks}${routePlacemarks && ldPlacemarks ? '\n' : ''}${ldPlacemarks}
   showToast(`⬇ <span class="accent">${parts.join(' + ')}</span> exportado(s)`);
 };
 
-// ─── TXT REPORT EXPORT ────────────────────────────────────────────────────────
-// Exports a plain-text summary: the distance of each route, the difference
-// between them, and a description of each route as the ordered sequence of
-// highways it travels (e.g. "BR-174; RR-342; RR-203; BR-174").
-window.exportRoutesTXT = async function() {
+// ─── LIVE RESULT ROWS (trajeto da alternativa / diferença em km) ──────────────
+// Two small display rows under the panels, kept up to date automatically as
+// either route is built/edited, each with its own compact copy button next
+// to the value (see index.html: #routeTrajetoValue / #routeDiffValue).
+function _copyText(text) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    return navigator.clipboard.writeText(text);
+  }
+  return new Promise((resolve, reject) => {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.focus(); ta.select();
+    try { document.execCommand('copy'); resolve(); }
+    catch (e) { reject(e); }
+    document.body.removeChild(ta);
+  });
+}
+
+function _flashCopyButton(btn, ok) {
+  if (!btn) return;
+  const original = btn.textContent;
+  btn.classList.add(ok ? 'copied' : 'copy-failed');
+  btn.textContent = ok ? '✓' : '✕';
+  setTimeout(() => {
+    btn.classList.remove('copied', 'copy-failed');
+    btn.textContent = original;
+  }, 1200);
+}
+
+// Recomputes both result rows from scratch (one shared OSRM round-trip per
+// route). Debounced at the call site so dragging a stop doesn't fire this
+// on every frame.
+async function _updateRouteResults() {
   const a = ROUTES.a; // vermelha / ROTA_ALTERNATIVA
   const b = ROUTES.b; // verde    / ROTA_ORIGINAL
+  const trajetoEl = document.getElementById('routeTrajetoValue');
+  const diffEl = document.getElementById('routeDiffValue');
+  if (!trajetoEl || !diffEl) return;
 
   const haveA = a.waypoints && a.waypoints.length >= 2;
   const haveB = b.waypoints && b.waypoints.length >= 2;
+
   if (!haveA && !haveB) {
-    showToast('Crie ao menos uma rota antes de exportar o relatório');
+    trajetoEl.textContent = '—';
+    diffEl.textContent = '—';
     return;
   }
 
-  showToast('📝 Gerando relatório…');
+  if (haveA) trajetoEl.textContent = '…';
+  if (haveA && haveB) diffEl.textContent = '…';
 
   const [descA, descB] = await Promise.all([
     haveA ? _fetchRouteDescription(a.waypoints) : Promise.resolve(null),
     haveB ? _fetchRouteDescription(b.waypoints) : Promise.resolve(null)
   ]);
 
-  // Prefer the freshly-fetched distance; fall back to the one already stored
-  // on the route if the request failed, so the report still has numbers.
+  trajetoEl.textContent = haveA
+    ? ((descA && descA.highways.length) ? descA.highways.join('; ') : '—')
+    : '—';
+
   const kmA = descA ? descA.distanceKm : (haveA ? a.distanceKm : null);
   const kmB = descB ? descB.distanceKm : (haveB ? b.distanceKm : null);
-
-  const fmtKm  = v => v != null ? `${v.toFixed(1)} KM` : '—';
-  const fmtSeq = d => (d && d.highways.length) ? d.highways.join('; ') : '—';
-
-  const lines = [];
-  lines.push('RELATORIO DE ROTAS');
-  lines.push('='.repeat(60));
-  lines.push('');
-
-  if (haveB) {
-    lines.push(`${_composeRouteName('b')}`);
-    lines.push(`  Extensao...: ${fmtKm(kmB)}`);
-    lines.push(`  Trajeto....: ${fmtSeq(descB)}`);
-    lines.push('');
-  }
-  if (haveA) {
-    lines.push(`${_composeRouteName('a')}`);
-    lines.push(`  Extensao...: ${fmtKm(kmA)}`);
-    lines.push(`  Trajeto....: ${fmtSeq(descA)}`);
-    lines.push('');
-  }
-
-  if (kmA != null && kmB != null) {
+  if (haveA && haveB && kmA != null && kmB != null) {
     const diff = kmA - kmB;
     const sign = diff >= 0 ? '+' : '-';
-    lines.push('-'.repeat(60));
-    lines.push(`DIFERENCA: ${sign}${Math.abs(diff).toFixed(1)} KM`);
-    lines.push(`  (${_composeRouteName('a')} em relacao a ${_composeRouteName('b')})`);
+    diffEl.textContent = `${sign}${Math.abs(diff).toFixed(1)} KM`;
   } else {
-    lines.push('-'.repeat(60));
-    lines.push('DIFERENCA: indisponivel (crie as duas rotas para comparar)');
+    diffEl.textContent = '—';
   }
-  lines.push('');
+}
 
-  const middle = (a.nameMiddle || b.nameMiddle || '').trim();
-  const safeMiddle = middle.replace(/[\\/:*?"<>|]/g, '_');
-  const fileName = safeMiddle ? `ROTA_ALTERNATIVA_${safeMiddle}.txt` : 'ROTA_ALTERNATIVA.txt';
+const _scheduleRouteResultsUpdate = debounce(_updateRouteResults, 700);
 
-  triggerDownload(new Blob([lines.join('\r\n')], { type: 'text/plain;charset=utf-8' }), fileName);
-  showToast(`⬇ Relatório <span class="accent">${fileName}</span> exportado`);
+// "📋" next to TRAJETO: -- copies whatever is currently shown (doesn't
+// re-fetch; the value row is always kept current by _updateRouteResults).
+window.copyRouteTrajeto = function() {
+  const el = document.getElementById('routeTrajetoValue');
+  const btn = document.getElementById('routeCopyTrajetoBtn');
+  const text = el ? el.textContent.trim() : '';
+  if (!text || text === '—' || text === '…') {
+    showToast('Trajeto ainda não disponível — adicione ao menos 2 paradas na Rota Alternativa');
+    return;
+  }
+  _copyText(text)
+    .then(() => _flashCopyButton(btn, true))
+    .catch(err => { console.error('Copy trajeto failed:', err); _flashCopyButton(btn, false); });
+};
+
+// "📋" next to DIFERENÇA (KM): -- same idea, copies the value currently shown.
+window.copyRouteDiffKm = function() {
+  const el = document.getElementById('routeDiffValue');
+  const btn = document.getElementById('routeCopyDiffBtn');
+  const text = el ? el.textContent.trim() : '';
+  if (!text || text === '—' || text === '…') {
+    showToast('Diferença ainda não disponível — crie as duas rotas primeiro');
+    return;
+  }
+  // The "+" shown on screen is just a visual cue that the alternative is
+  // longer; it's noise once pasted elsewhere, so strip it from what's
+  // actually copied (a "-" for a shorter alternative is kept, since that
+  // sign is meaningful).
+  const copyValue = text.replace(/^\+/, '');
+  _copyText(copyValue)
+    .then(() => _flashCopyButton(btn, true))
+    .catch(err => { console.error('Copy diff failed:', err); _flashCopyButton(btn, false); });
 };

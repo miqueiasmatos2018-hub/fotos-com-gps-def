@@ -13,7 +13,8 @@
 // from (letter, tramo index, total tramo count) rather than frozen at
 // click time, so a point that fell back to "TRANSIÇÃO 02" for being on the
 // last tramo automatically updates to "APOIO NN" if more tramos are added
-// afterward. The list persists in localStorage across reloads.
+// afterward. The list and the tramo count do NOT persist across reloads --
+// both reset to empty / 1 tramo every time the page loads.
 //
 // Ported from a standalone tool (gerador-nomes) with the same two changes
 // made for the Elementos tab, for the same reasons:
@@ -229,15 +230,15 @@
   // added afterward).
   // =====================================================================
 
-  var INF_STORAGE_KEY   = 'sge-nomes-inferiores-pontos';   // [{id, tramo, letter}], em ordem de clique
+  // Não persistem em localStorage: tanto os nomes gerados (pontos
+  // preenchidos) quanto a quantidade de tramos voltam ao padrão (nenhum
+  // ponto, 1 tramo) toda vez que a página é recarregada.
   var START_NUMBER_KEY  = 'sge-nomes-numero-inicial';       // reaproveita a mesma chave/campo de antes
-  var TRAMO_COUNT_KEY   = 'sge-nomes-inferiores-qtd-tramos';
 
-  var filled = loadJSON(INF_STORAGE_KEY, []);
-  function saveFilled(){ saveJSON(INF_STORAGE_KEY, filled); }
+  var filled = [];
+  function saveFilled(){ /* intencionalmente sem persistência */ }
 
-  var tramoCount = loadJSON(TRAMO_COUNT_KEY, 1);
-  if (tramoCount < 1 || tramoCount > 20) tramoCount = 1;
+  var tramoCount = 1;
   tramoCountSel.value = String(tramoCount);
 
   var startNumber = loadJSON(START_NUMBER_KEY, 12);
@@ -403,7 +404,6 @@
       filled = filled.filter(function(f){ return f.tramo <= tramoCount; });
       saveFilled();
     }
-    saveJSON(TRAMO_COUNT_KEY, tramoCount);
     renderAll();
   });
 

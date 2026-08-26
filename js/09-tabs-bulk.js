@@ -16,7 +16,17 @@ window.switchTab = function(tab) {
   if (tab !== 'rotas' && typeof _routePickingKey !== 'undefined' && _routePickingKey) {
     window.toggleRoutePicking(_routePickingKey);
   }
-  ['photos','pontos','rotas'].forEach(t => {
+  // The structure outline drawing only makes sense while looking at the
+  // Medidas tab -- show it when entering, hide it the moment you leave.
+  if (typeof _setMedidasLayerVisible === 'function') {
+    _setMedidasLayerVisible(tab === 'medidas');
+  }
+  // Elementos/Nomes cover the whole screen and don't use the sidebar, so
+  // floating sidebar controls (like the collapse toggle) that sit at a
+  // higher z-index than the overlay would otherwise poke through on top
+  // of it -- this class lets CSS hide them specifically for these tabs.
+  document.body.classList.toggle('fullscreen-tab-active', tab === 'elementos' || tab === 'nomes');
+  ['photos','pontos','rotas','medidas','elementos','nomes'].forEach(t => {
     const btn = document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1));
     const content = document.getElementById('tabContent' + t.charAt(0).toUpperCase() + t.slice(1));
     if (btn)     btn.classList.toggle('active',     t === tab);

@@ -13,9 +13,10 @@ const _orientLayers = {
     'https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png',
     { attribution: '© CartoDB', opacity: 0.9, pane: 'overlayPane', zIndex: 400 }
   ),
+  // OpenStreetMap: confiável e traz a numeração das BRs
   roads: L.tileLayer(
-    'https://tile.waymarkedtrails.org/cycling/{z}/{x}/{y}.png',
-    { attribution: '© OpenStreetMap', opacity: 0.0 } // placeholder
+    'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    { attribution: '© OpenStreetMap', opacity: 0.35, maxZoom: 21 }
   ),
   hybrid: L.tileLayer(
     'https://mt1.google.com/vt/lyrs=h&x={x}&y={y}&z={z}',
@@ -23,24 +24,24 @@ const _orientLayers = {
   )
 };
 
-// Use OpenStreetMap for roads — reliable and has BR highway numbers
-_orientLayers.roads = L.tileLayer(
-  'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-  { attribution: '© OpenStreetMap', opacity: 0.35, maxZoom: 21 }
-);
-
 const _orientActive = { cities: false, roads: false, hybrid: false };
 
-// Enable hybrid by default
+function _orientCheckEl(key) {
+  return document.getElementById('check' + key.charAt(0).toUpperCase() + key.slice(1));
+}
+
+// Híbrido ligado por padrão
 _orientLayers.hybrid.addTo(map);
 _orientActive.hybrid = true;
-document.getElementById('checkHybrid').textContent = '●';
-document.getElementById('checkHybrid').style.color = 'var(--accent)';
+(function() {
+  const el = _orientCheckEl('hybrid');
+  if (el) { el.textContent = '●'; el.style.color = 'var(--accent)'; }
+})();
 
 window.toggleOrientLayer = function(key) {
+  if (!_orientLayers[key]) return;
   const isOn = _orientActive[key];
-  const check = document.getElementById('checkCities'.replace('Cities', key.charAt(0).toUpperCase() + key.slice(1)));
-  const checkEl = document.getElementById('check' + key.charAt(0).toUpperCase() + key.slice(1));
+  const checkEl = _orientCheckEl(key);
 
   if (isOn) {
     map.removeLayer(_orientLayers[key]);

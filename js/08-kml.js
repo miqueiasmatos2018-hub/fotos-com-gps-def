@@ -208,7 +208,7 @@ async function runEpocaLookupForLayer(parsedLayer) {
   });
 }
 
-function buildStyledGeoJsonOptions(dotColor, fields) {
+function buildStyledGeoJsonOptions(dotColor, fields, options) {
   return {
     style: {
       color: dotColor,
@@ -223,7 +223,8 @@ function buildStyledGeoJsonOptions(dotColor, fields) {
       color: '#000',
       weight: 1,
       opacity: 1,
-      fillOpacity: 0.8
+      fillOpacity: 0.8,
+      renderer: options && options.renderer
     }),
     onEachFeature: (feature, layer) => {
       const props = feature.properties || {};
@@ -233,12 +234,12 @@ function buildStyledGeoJsonOptions(dotColor, fields) {
         const name = props.Identificacao_OAE || props.codigo_SGO || '—';
         const rows = fields
           .filter(f => f.key !== 'Identificacao_OAE') // already shown as the title
-          .map(f => `<div class="popup-row">${f.label}: <span>${props[f.key] || '—'}</span></div>`)
+          .map(f => `<div class="popup-row">${f.label}: <span>${escapeHtml(props[f.key] || '—')}</span></div>`)
           .join('');
 
         layer.bindPopup(`
           <div class="popup-content">
-            <div class="popup-name">${name}</div>
+            <div class="popup-name">${escapeHtml(name)}</div>
             ${rows}
           </div>
         `, { maxHeight: 280 });
@@ -256,11 +257,12 @@ function buildStyledGeoJsonOptions(dotColor, fields) {
       const latlng = layer.getLatLng ? layer.getLatLng()
                    : (layer.getBounds ? layer.getBounds().getCenter() : null);
       const hGeo = props.H_GEO ?? props.h_geo ?? props.H_Geo ?? props.HGEO ?? null;
+      const safeHGeo = escapeHtml(hGeo);
 
       const rows = [
         latlng ? `<div class="popup-row">LAT: <span>${latlng.lat.toFixed(8)}</span></div>` : '',
         latlng ? `<div class="popup-row">LONG: <span>${latlng.lng.toFixed(8)}</span></div>` : '',
-        (hGeo !== null && hGeo !== '') ? `<div class="popup-row">H_GEO: <span>${hGeo}</span></div>` : ''
+        (hGeo !== null && hGeo !== '') ? `<div class="popup-row">H_GEO: <span>${safeHGeo}</span></div>` : ''
       ].join('');
 
       // LD_INICIO / LD_INICIO_OAE points get two extra rows that are filled
@@ -278,7 +280,7 @@ function buildStyledGeoJsonOptions(dotColor, fields) {
 
       layer.bindPopup(`
         <div class="popup-content">
-          <div class="popup-name">${name}</div>
+          <div class="popup-name">${escapeHtml(name)}</div>
           ${rows}
           ${dnitRow}
           ${epocaRow}
@@ -387,7 +389,13 @@ async function loadEmbeddedCsv() {
     const rows = parseCSV(csvText);
     const geojson = csvRowsToGeoJSON(rows);
 
-    const parsed = L.geoJSON(geojson, buildStyledGeoJsonOptions(dotColor, POPUP_FIELDS));
+    // ~3 mil pontos como SVG viravam 3 mil nós no DOM e deixavam qualquer
+    // zoom/arrasto travado. O renderizador de canvas desenha todos em uma
+    // superfície só, mantendo popup e clique funcionando.
+    const csvRenderer = L.canvas({ padding: 0.5 });
+    const opts = buildStyledGeoJsonOptions(dotColor, POPUP_FIELDS, { renderer: csvRenderer });
+    opts.renderer = csvRenderer;
+    const parsed = L.geoJSON(geojson, opts);
     parsed.addTo(map);
 
     const bounds = parsed.getBounds();
@@ -404,6 +412,24 @@ async function loadEmbeddedCsv() {
     console.error('Embedded CSV load error:', err);
     showToast(`Erro ao carregar CSV: ${err.message}`);
   }
+}
+
+// Um .kmz é um ZIP contendo o doc.kml (às vezes com outro nome). A versão
+// anterior lia o arquivo inteiro com readAsText, o que devolvia bytes
+// binários como texto e o omnivore falhava sem explicação -- o painel
+// aceitava .kmz mas nunca conseguia abrir nenhum.
+async function _readKmlText(file) {
+  const isKmz = /\.kmz$/i.test(file.name) ||
+                file.type === 'application/vnd.google-earth.kmz';
+  if (!isKmz) return await file.text();
+
+  if (typeof JSZip === 'undefined') throw new Error('JSZip indisponível para abrir KMZ');
+  const zip = await JSZip.loadAsync(file);
+  const entryName = Object.keys(zip.files)
+    .filter(n => /\.kml$/i.test(n) && !zip.files[n].dir)
+    .sort((a, b) => (/doc\.kml$/i.test(b) ? 1 : 0) - (/doc\.kml$/i.test(a) ? 1 : 0))[0];
+  if (!entryName) throw new Error('Nenhum .kml encontrado dentro do KMZ');
+  return await zip.files[entryName].async('string');
 }
 
 function loadKmlFile(file, options = {}) {
@@ -423,15 +449,12 @@ function loadKmlFile(file, options = {}) {
     kmlProgressFill.style.width = fakeProgress + '%';
   }, 100);
 
-  const reader = new FileReader();
-  reader.onload = e => {
+  _readKmlText(file).then(kmlText => {
     clearInterval(progressInterval);
     kmlProgressFill.style.width = '95%';
 
     try {
-      const kmlText = e.target.result;
-
-      // Parse KML using DOMParser + leaflet-omnivore
+      // Parse do KML via omnivore
       const customLayer = L.geoJSON(null, buildStyledGeoJsonOptions(dotColor));
 
       // Use omnivore to parse KML text
@@ -475,18 +498,15 @@ function loadKmlFile(file, options = {}) {
     } catch (err) {
       clearInterval(progressInterval);
       kmlProgress.classList.remove('show');
-      showToast(`Erro ao carregar KML: ${err.message}`);
+      showToast(`Erro ao carregar KML: ${escapeHtml(err.message)}`);
       console.error(err);
     }
-  };
-
-  reader.onerror = () => {
+  }).catch(err => {
     clearInterval(progressInterval);
     kmlProgress.classList.remove('show');
-    showToast('Erro ao ler o arquivo');
-  };
-
-  reader.readAsText(file, 'UTF-8');
+    showToast(`Erro ao ler o arquivo: ${escapeHtml(err.message)}`);
+    console.error(err);
+  });
 }
 
 function addKmlLayerEntry(id, name, count) {
@@ -497,12 +517,13 @@ function addKmlLayerEntry(id, name, count) {
   entry.innerHTML = `
     <div class="layer-dot" style="background:#e8ff4d;box-shadow:0 0 6px rgba(232,255,77,0.5)"></div>
     <div class="layer-info">
-      <div class="kml-file-name" title="${name}">${shortName}</div>
+      <div class="kml-file-name" title="${escapeHtml(name)}">${escapeHtml(shortName)}</div>
       <div class="layer-desc">${count.toLocaleString()} feições</div>
     </div>
     <button class="kml-remove-btn" onclick="removeKmlLayer('${id}')" title="Remover">✕</button>
   `;
   kmlLayerList.appendChild(entry);
+  if (typeof invalidateKmlSearchIndex === 'function') invalidateKmlSearchIndex();
   window._scheduleKmlPanelCollapse();
 }
 
@@ -513,5 +534,8 @@ window.removeKmlLayer = function(id) {
   }
   const entry = document.getElementById('kml-entry-' + id);
   if (entry) entry.remove();
+  // O índice de busca guarda uma cópia das feições; sem invalidar aqui, uma
+  // camada removida continuava aparecendo nos resultados.
+  if (typeof invalidateKmlSearchIndex === 'function') invalidateKmlSearchIndex();
   showToast('Camada KML removida');
 };

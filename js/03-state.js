@@ -10,6 +10,7 @@
 const photos = [];
 const markers = {};
 let activeId = null;
+const selectedPhotoIds = new Set(); // ids checked for bulk "baixar selecionadas"
 
 // ─── DEBOUNCE HELPER ──────────────────────────────────────────────────────────
 function debounce(fn, ms) {
@@ -67,7 +68,7 @@ function _applySnapshot(snap) {
         coordEl.textContent = `${photo.lat.toFixed(5)}, ${photo.lng.toFixed(5)}`;
         coordEl.className = 'photo-coords has-gps';
       } else {
-        coordEl.textContent = 'No GPS data';
+        coordEl.textContent = 'Sem dados de GPS';
         coordEl.className = 'photo-coords no-gps';
       }
     }
@@ -78,20 +79,30 @@ function _applySnapshot(snap) {
   if (activeId === photo.id) showDetail(photo);
   refreshDateTimeline();
   _updateStatsDebounced();
-  showToast('↩ Undo');
+  showToast('↩ Desfeito');
+}
+
+// A guarda de "está digitando?" precisa vir ANTES de qualquer atalho --
+// inclusive do Ctrl+Z. Antes o Ctrl+Z era capturado mesmo dentro de um
+// campo de texto (com preventDefault), então desfazer a digitação de um
+// nome revertia a última edição de foto em vez de apagar o que foi
+// digitado, e o desfazer nativo do input ficava inutilizável.
+function _isTypingTarget(el) {
+  if (!el) return false;
+  if (['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName)) return true;
+  return !!el.isContentEditable;
 }
 
 document.addEventListener('keydown', e => {
-  if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+  if (_isTypingTarget(document.activeElement) || _isTypingTarget(e.target)) return;
+
+  if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z') && !e.shiftKey) {
     e.preventDefault();
-    if (_undoStack.length === 0) { showToast('Nothing to undo'); return; }
+    if (_undoStack.length === 0) { showToast('Nada para desfazer'); return; }
     const snap = _undoStack.pop();
     _applySnapshot(snap);
+    return;
   }
-
-  // Skip all shortcuts if typing in an input
-  if (document.activeElement && ['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName)) return;
-  if (document.activeElement && document.activeElement.isContentEditable) return;
 
   // Delete / Backspace: remove selected photo
   if ((e.key === 'Delete' || e.key === 'Backspace') && activeId != null) {
@@ -114,6 +125,8 @@ document.addEventListener('keydown', e => {
 
     // Remove from photos array
     photos.splice(idx, 1);
+    selectedPhotoIds.delete(photo.id);
+    if (typeof _updateSelectedPhotosBar === 'function') _updateSelectedPhotosBar();
 
     // Remove list item
     const item = document.querySelector(`.photo-item[data-id="${photo.id}"]`);
@@ -124,8 +137,9 @@ document.addEventListener('keydown', e => {
     detailPanel.style.display = 'none';
 
     updateStats();
-      refreshDateTimeline();
+    refreshDateTimeline();
     renderSortedList();
+    checkDuplicateGps();
 
     if (!photos.length) {
       document.getElementById('fitAllBtn').style.display = 'none';

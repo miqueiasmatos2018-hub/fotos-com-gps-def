@@ -7,14 +7,20 @@
 // see the <script> tags at the bottom of index.html.
 // ==========================================================================
 
+// Declarado aqui em cima porque showDetail() precisa dele para reaplicar o
+// modo de edição a cada re-render (antes, qualquer atualização do painel
+// desligava a edição sem mudar o rótulo do botão).
+let metaEditMode = false;
+
 function buildPhotoPopupHtml(photo) {
   const exif = photo.exif || {};
   const id = photo.id;
+  const hasGps = photo.lat != null && photo.lng != null;
   return `
     <div class="popup-content" style="min-width:220px">
-      <img class="popup-img" src="${photo.url}" alt="${photo.name}">
+      <img class="popup-img" src="${photo.url}" alt="" loading="lazy">
       <input class="popup-edit-name" data-field="name" data-id="${id}"
-        value="${photo.name.replace(/"/g,'&quot;')}" maxlength="80" spellcheck="false">
+        value="${escapeHtml(photo.name)}" maxlength="120" spellcheck="false">
       <div class="popup-edit-row">
         <span class="popup-edit-label">GPS Lat</span>
         <input class="popup-edit-input" data-field="lat" data-id="${id}"
@@ -32,8 +38,8 @@ function buildPhotoPopupHtml(photo) {
       </div>
       <div class="popup-btn-row">
         <button class="popup-save-btn" onclick="savePopupEdits('${id}')">SALVAR</button>
-        <button class="popup-relocate-btn" onclick="startRelocateMode('${id}')" title="Click map to redefine location">🗺</button>
-        <button class="popup-relocate-btn" onclick="openSVAtMarker(${photo.lat}, ${photo.lng})" title="Abrir no Google Maps">🌐</button>
+        <button class="popup-relocate-btn" onclick="startRelocateMode('${id}')" title="Clicar no mapa para redefinir a localização">🗺</button>
+        ${hasGps ? `<button class="popup-relocate-btn" onclick="openSVAtMarker(${photo.lat}, ${photo.lng})" title="Abrir no Google Maps">🌐</button>` : ''}
       </div>
     </div>
   `;
@@ -58,7 +64,7 @@ window.savePopupEdits = function(id) {
     if (field === 'name') {
       if (val) {
         photo.name = val;
-        // update sidebar list item
+        // atualiza o item da barra lateral (textContent já escapa sozinho)
         const listItem = document.querySelector(`.photo-item[data-id="${id}"]`);
         if (listItem) {
           const nameText = listItem.querySelector('.photo-name-text');
@@ -88,9 +94,24 @@ window.savePopupEdits = function(id) {
   // Re-attach events after content swap
   setTimeout(() => attachPopupEvents(id), 50);
 
-  // Update detail panel if active
+  // Atualiza o painel de detalhes se esta for a foto ativa
   if (activeId == id) showDetail(photo);
-  showToast('Photo updated ✓');
+
+  // A edição pode ter mudado nome (ordem da lista) e coordenadas (contagem
+  // de GPS / duplicatas). Antes nada disso era atualizado até recarregar.
+  const listItem = document.querySelector(`.photo-item[data-id="${id}"]`);
+  if (listItem) {
+    const coordEl = listItem.querySelector('.photo-coords');
+    if (coordEl && photo.lat != null) {
+      coordEl.textContent = `${photo.lat.toFixed(5)}, ${photo.lng.toFixed(5)}`;
+      coordEl.className = 'photo-coords has-gps';
+    }
+  }
+  renderSortedList();
+  refreshDateTimeline();
+  updateStats();
+  checkDuplicateGps();
+  showToast('Foto atualizada ✓');
 };
 
 function attachPopupEvents(id) {
@@ -153,8 +174,9 @@ window.startRelocateMode = function(id) {
       m.openPopup();
       setTimeout(() => attachPopupEvents(_pickingForId), 60);
     } else {
-      // photo had no GPS before — create marker now
+      // a foto não tinha GPS antes -- cria o marcador agora
       addMarker(photo);
+      updateStats();
       markers[photo.id].openPopup();
       // update list item GPS display
       const listItem = document.querySelector(`.photo-item[data-id="${photo.id}"]`);
@@ -182,7 +204,7 @@ window.startRelocateMode = function(id) {
     }
 
     if (activeId == photo.id) showDetail(photo);
-    showToast(`📍 Location set — <span class="accent">${lat.toFixed(5)}, ${lng.toFixed(5)}</span>`);
+    showToast(`📍 Localização definida — <span class="accent">${lat.toFixed(5)}, ${lng.toFixed(5)}</span>`);
     cancelRelocateMode();
   };
 
@@ -249,8 +271,9 @@ function selectPhoto(id) {
   const photo = photos.find(p => p.id == id);
   if (!photo) return;
 
-  // Activate list item
-  const listItem = document.querySelector(`[data-id="${id}"]`);
+  // Ativa o item da lista -- escopo em .photo-item de propósito: um seletor
+  // solto por [data-id] podia casar com outro elemento da interface.
+  const listItem = document.querySelector(`.photo-item[data-id="${id}"]`);
   if (listItem) {
     listItem.classList.add('active');
     listItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -286,7 +309,7 @@ function showDetail(photo) {
 
   const fields = [
     ['Nome do Arquivo', photo.name, null],
-    ['Tamanho do Arquivo', formatSize(photo.file.size), null],
+    ['Tamanho do Arquivo', photo.file ? formatSize(photo.file.size) : '—', null],
     ['Dimensões', exif.ImageWidth ? `${exif.ImageWidth} × ${exif.ImageHeight}` : '—', null],
     ['Data', exif.DateTimeOriginal ? formatDate(exif.DateTimeOriginal) : '—', 'DateTimeOriginal'],
     ['Marca da Câmera', exif.Make || '—', 'Make'],
@@ -305,10 +328,11 @@ function showDetail(photo) {
 
   detailRows.innerHTML = fields.map(([k, v, metaKey]) => {
     const canEdit = metaKey !== null;
+    const sv = escapeHtml(v);
     return `
       <div class="detail-row${canEdit ? ' editable' : ''}" data-meta-key="${metaKey || ''}">
         <span class="detail-key">${k}</span>
-        <span class="detail-val" ${canEdit ? `contenteditable="false" data-original="${v}" data-photo-id="${photo.id}"` : ''}>${v}</span>
+        <span class="detail-val" ${canEdit ? `contenteditable="${metaEditMode}" data-original="${sv}" data-photo-id="${photo.id}"` : ''}>${sv}</span>
       </div>
     `;
   }).join('');
@@ -327,11 +351,14 @@ function showDetail(photo) {
 }
 
 function commitMetaEdit(el, photo) {
-  pushUndo(photo);
   const row = el.closest('.detail-row');
   const metaKey = row.dataset.metaKey;
   const newVal = el.textContent.trim();
+  // pushUndo vinha ANTES desta guarda: só entrar e sair de um campo sem
+  // digitar nada já empilhava um "desfazer" vazio, e o Ctrl+Z precisava ser
+  // apertado várias vezes para surtir efeito.
   if (!newVal || newVal === el.dataset.original) return;
+  pushUndo(photo);
 
   // Persist into photo object
   if (metaKey === 'lat') {
@@ -353,29 +380,21 @@ function commitMetaEdit(el, photo) {
   dot.classList.add('show');
   setTimeout(() => dot.classList.remove('show'), 1800);
 
-  // Update marker popup if it exists
+  // Atualiza o popup do marcador, se existir
   if (markers[photo.id]) {
-    const exif = photo.exif || {};
-    const rows = [
-      ['Coordinates', photo.lat != null ? `${photo.lat.toFixed(6)}, ${photo.lng.toFixed(6)}` : '—'],
-      exif.DateTimeOriginal ? ['Data', formatDate(exif.DateTimeOriginal)] : null,
-      exif.Make ? ['Camera', `${exif.Make || ''} ${exif.Model || ''}`.trim()] : null,
-    ].filter(Boolean);
-    const rowsHtml = rows.map(([k, v]) => `<div class="popup-row">${k} <span>${v}</span></div>`).join('');
-markers[photo.id].setPopupContent(buildPhotoPopupHtml(photo));
+    markers[photo.id].setPopupContent(buildPhotoPopupHtml(photo));
 
-    // Update marker position if GPS changed
-    if (metaKey === 'lat' || metaKey === 'lng') {
-      if (photo.lat != null && photo.lng != null) {
-        markers[photo.id].setLatLng([photo.lat, photo.lng]);
-      }
+    if ((metaKey === 'lat' || metaKey === 'lng') && photo.lat != null && photo.lng != null) {
+      markers[photo.id].setLatLng([photo.lat, photo.lng]);
+      const item = document.querySelector(`.photo-item[data-id="${photo.id}"] .photo-coords`);
+      if (item) item.textContent = `${photo.lat.toFixed(5)}, ${photo.lng.toFixed(5)}`;
+      checkDuplicateGps();
     }
   }
 
-  showToast(`<span class="accent">${metaKey}</span> updated`);
+  showToast(`<span class="accent">${escapeHtml(metaKey)}</span> atualizado`);
 }
 
-let metaEditMode = false;
 window.toggleMetaEdit = function() {
   metaEditMode = !metaEditMode;
   const btn = document.getElementById('editMetaBtn');

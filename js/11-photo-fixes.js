@@ -7,6 +7,11 @@
 // see the <script> tags at the bottom of index.html.
 // ==========================================================================
 
+// Limites do padrão de inspeção. Declarados no topo do arquivo porque
+// funções deste e de outros módulos (04-photos.js) os usam.
+const MAX_PHOTO_BYTES = 30 * 1024 * 1024; // 30MB
+const MIN_PHOTO_MP    = 12;
+
 window.upscaleLowMpPhotos = async function() {
   const TARGET_W = 8064;
   const TARGET_H = 4536;
@@ -25,6 +30,7 @@ window.upscaleLowMpPhotos = async function() {
     const photo = lowPhotos[i];
     label.textContent = `${i + 1} / ${lowPhotos.length} — ${photo.name}`;
     bar.style.width = ((i / lowPhotos.length) * 100) + '%';
+    pushUndo(photo); // redimensionar é destrutivo e não era registrado no desfazer
 
     await new Promise(resolve => {
       const img = new Image();
@@ -74,26 +80,14 @@ window.upscaleLowMpPhotos = async function() {
           photo.imgWidth    = targetW;
           photo.imgHeight   = targetH;
 
-          // Update thumbnail in sidebar
-          const thumb = document.querySelector(`.photo-item[data-id="${photo.id}"] .photo-thumb`);
-          if (thumb) thumb.src = newUrl;
-
-          // Update mp-dot to green
-          const dot = document.querySelector(`.photo-item[data-id="${photo.id}"] .mp-dot`);
-          if (dot) {
-            dot.classList.remove('low', 'unknown');
-            dot.classList.add('ok');
-            dot.title = `${photo.megapixels.toFixed(1)} MP — ${targetW}×${targetH}`;
-          }
-
-          // Update popup if open
-          const m = markers[photo.id];
-          if (m) m.setPopupContent(buildPhotoPopupHtml(photo));
-
-          // Update detail panel if active
-          if (activeId === photo.id) showDetail(photo);
-
-          resolve();
+          // Regera a miniatura a partir da imagem nova: antes o painel e o
+          // marcador continuavam mostrando a miniatura da versão antiga.
+          buildThumbForPhoto(photo).finally(() => {
+            const m = markers[photo.id];
+            if (m) m.setPopupContent(buildPhotoPopupHtml(photo));
+            if (activeId === photo.id) showDetail(photo);
+            resolve();
+          });
         }, 'image/jpeg', 0.95);
       };
       img.onerror = resolve;
@@ -145,6 +139,7 @@ window.compressOverSizePhotos = async function() {
     const photo = overPhotos[i];
     label.textContent = `${i + 1} / ${overPhotos.length} — ${photo.name}`;
     bar.style.width = ((i / overPhotos.length) * 100) + '%';
+    pushUndo(photo);
 
     await new Promise(resolve => {
       const img = new Image();
@@ -159,12 +154,18 @@ window.compressOverSizePhotos = async function() {
         let bestBlob = null;
         let bestW = srcW, bestH = srcH;
 
-        // 1) Try quality reduction alone, at full size, first.
-        const qualitySteps = [0.9, 0.8, 0.7, 0.6, 0.5];
+        // 1) Primeiro tenta só reduzir a qualidade, mantendo o tamanho.
+        //    As qualidades vão da maior para a menor e o laço para na
+        //        PRIMEIRA que couber no limite -- assim sobra a melhor
+        //    qualidade possível, e não a menor imagem possível (a versão
+        //    anterior continuava trocando pelo blob menor mesmo depois de
+        //    já ter um que cabia).
+        const qualitySteps = [0.92, 0.88, 0.82, 0.75, 0.65, 0.55, 0.45];
         for (const q of qualitySteps) {
           const blob = await renderAt(img, srcW, srcH, q);
-          if (blob && (!bestBlob || blob.size < bestBlob.size)) { bestBlob = blob; bestW = srcW; bestH = srcH; }
-          if (blob && blob.size <= MAX_PHOTO_BYTES) { bestBlob = blob; bestW = srcW; bestH = srcH; break; }
+          if (!blob) continue;
+          if (blob.size <= MAX_PHOTO_BYTES) { bestBlob = blob; bestW = srcW; bestH = srcH; break; }
+          if (!bestBlob || blob.size < bestBlob.size) { bestBlob = blob; bestW = srcW; bestH = srcH; }
         }
 
         // 2) If still over budget, progressively downscale (never below
@@ -193,24 +194,12 @@ window.compressOverSizePhotos = async function() {
         photo.imgWidth   = bestW;
         photo.imgHeight  = bestH;
 
-        // Update thumbnail
-        const thumb = document.querySelector(`.photo-item[data-id="${photo.id}"] .photo-thumb`);
-        if (thumb) thumb.src = newUrl;
-
-        // Update mp-dot (dimensions may have changed slightly)
-        const dot = document.querySelector(`.photo-item[data-id="${photo.id}"] .mp-dot`);
-        if (dot) {
-          dot.classList.remove('low', 'unknown');
-          dot.classList.add(photo.megapixels >= MIN_PHOTO_MP ? 'ok' : 'low');
-          dot.title = `${photo.megapixels.toFixed(1)} MP — ${bestW}×${bestH}`;
-        }
-
-        // Update popup / detail panel if relevant
-        const m = markers[photo.id];
-        if (m) m.setPopupContent(buildPhotoPopupHtml(photo));
-        if (activeId === photo.id) showDetail(photo);
-
-        resolve();
+        buildThumbForPhoto(photo).finally(() => {
+          const m = markers[photo.id];
+          if (m) m.setPopupContent(buildPhotoPopupHtml(photo));
+          if (activeId === photo.id) showDetail(photo);
+          resolve();
+        });
       };
       img.onerror = resolve;
       img.src = photo.url;
@@ -291,14 +280,17 @@ window.randomizeDupGps = function() {
   }
 
   closeDupGpsPopup();
-  showToast(`⇄ <span class="accent">${changed}</span> fotos dispersadas até ${meters}m`);
-  if (activeId) showDetail(photos.find(p => p.id === activeId));
+  // As chaves antigas apontam para coordenadas que já não existem; mantê-las
+  // impedia que uma duplicata futura no mesmo ponto fosse anunciada.
+  _knownDupKeys.clear();
+  checkDuplicateGps();
+  updateStats();
+  showToast(`⇄ <span class="accent">${changed}</span> foto${changed === 1 ? '' : 's'} dispersada${changed === 1 ? '' : 's'} até ${meters}m`);
+  const active = activeId != null ? photos.find(p => p.id === activeId) : null;
+  if (active) showDetail(active);
 };
 
-// ─── PHOTO ISSUES ALERT (No GPS / Low MP / Over 30MB) ─────────────────────────
-const MAX_PHOTO_BYTES = 30 * 1024 * 1024; // 30MB
-const MIN_PHOTO_MP    = 12;
-
+// ─── ALERTA DE PROBLEMAS (sem GPS / abaixo de 12MP / acima de 30MB) ──────────
 function checkPhotoIssues() {
   const noGps    = photos.filter(p => p.lat == null);
   const lowMp    = photos.filter(p => p.megapixels != null && p.megapixels < MIN_PHOTO_MP);

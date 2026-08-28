@@ -15,12 +15,23 @@
 
   let _activeMarker = null;
 
+  // ─── ÍNDICE DE BUSCA (em cache) ─────────────────────────────────────────
+  // Este levantamento era refeito do zero A CADA TECLA digitada: com o
+  // current.csv carregado são ~3 mil feições percorridas por caractere, o
+  // que travava visivelmente a digitação. Agora o índice é construído uma
+  // vez e só é descartado quando uma camada entra ou sai do mapa
+  // (invalidateKmlSearchIndex, chamada de 08-kml.js).
+  let _featureIndex = null;
+
+  window.invalidateKmlSearchIndex = function() { _featureIndex = null; };
+
   function getAllKmlFeatures() {
+    if (_featureIndex) return _featureIndex;
     const features = [];
     Object.values(kmlLayers).forEach(({ layer, name: fileName }) => {
-      if (!layer._layers) return;
+      if (!layer || !layer._layers) return;
       Object.values(layer._layers).forEach(l => {
-        // Recurse into group layers
+        // Desce em camadas de grupo
         const sublayers = l._layers ? Object.values(l._layers) : [l];
         sublayers.forEach(sl => {
           const props = sl.feature?.properties || sl.options?.properties || {};
@@ -31,19 +42,29 @@
           const searchText = [fname, oae, sgo].filter(Boolean).join(' · ');
           const latlng = sl.getLatLng?.() || sl.getBounds?.()?.getCenter?.();
           if (!latlng) return;
-          features.push({ name: fname || oae, oae, sgo, searchText, props, latlng, layer: sl, fileName });
+          features.push({
+            name: fname || oae, oae, sgo, searchText,
+            // Comparação em minúsculas pré-calculada: fazer toLowerCase() de
+            // 3 mil strings por tecla era metade do custo da busca.
+            haystack: searchText.toLowerCase(),
+            props, latlng, layer: sl, fileName
+          });
         });
       });
     });
+    _featureIndex = features;
     return features;
   }
 
+  // Destaca o trecho encontrado -- escapando antes, já que o resultado vai
+  // para innerHTML e o texto vem de arquivos importados.
   function highlight(text, query) {
-    const idx = text.toLowerCase().indexOf(query.toLowerCase());
-    if (idx === -1) return text;
-    return text.slice(0, idx)
-      + `<mark>${text.slice(idx, idx + query.length)}</mark>`
-      + text.slice(idx + query.length);
+    const src = String(text == null ? '' : text);
+    const idx = src.toLowerCase().indexOf(query.toLowerCase());
+    if (idx === -1) return escapeHtml(src);
+    return escapeHtml(src.slice(0, idx))
+      + `<mark>${escapeHtml(src.slice(idx, idx + query.length))}</mark>`
+      + escapeHtml(src.slice(idx + query.length));
   }
 
   // Parse coordinates from query: "-5.286997 -61.934218" or "-5.286997, -61.934218"
@@ -127,7 +148,7 @@ function removeCustomMarker(idx) {
 
     marker.bindPopup(`
       <div class="popup-content" style="min-width:180px">
-        <div class="popup-name" style="font-size:12px">${name}</div>
+        <div class="popup-name" style="font-size:12px">${escapeHtml(name)}</div>
         <div class="popup-row">Lat <span>${lat.toFixed(8)}</span></div>
         <div class="popup-row">Lng <span>${lng.toFixed(8)}</span></div>
         <button class="popup-save-btn" style="margin-top:8px;background:#f44336;"
@@ -148,7 +169,7 @@ function removeCustomMarker(idx) {
       item.innerHTML = `
         <span class="ponto-icon">📌</span>
         <div class="ponto-info">
-          <span class="ponto-name" contenteditable="true" spellcheck="false" title="Clique para renomear">${name}</span>
+          <span class="ponto-name" contenteditable="true" spellcheck="false" title="Clique para renomear">${escapeHtml(name)}</span>
           <div class="ponto-coords">${lat.toFixed(6)}, ${lng.toFixed(6)}</div>
         </div>
         <button class="ponto-delete" title="Remover">✕</button>
@@ -166,7 +187,7 @@ function removeCustomMarker(idx) {
         // Update popup content
         marker.setPopupContent(`
           <div class="popup-content" style="min-width:180px">
-            <div class="popup-name" style="font-size:12px">${newName}</div>
+            <div class="popup-name" style="font-size:12px">${escapeHtml(newName)}</div>
             <div class="popup-row">Lat <span>${lat.toFixed(8)}</span></div>
             <div class="popup-row">Lng <span>${lng.toFixed(8)}</span></div>
             <button class="popup-save-btn" style="margin-top:8px;background:#f44336;"
@@ -195,7 +216,11 @@ function removeCustomMarker(idx) {
       pontosList.appendChild(item);
     }
 
-    map.setView([lat, lng], Math.max(map.getZoom(), 15), { animate: true });
+    // Só aproxima quando o ponto ficou fora da vista: criando vários pontos
+    // seguidos, o recentro a cada clique fazia o mapa "pular" o tempo todo.
+    if (!map.getBounds().contains([lat, lng])) {
+      map.setView([lat, lng], Math.max(map.getZoom(), 15), { animate: true });
+    }
     marker.openPopup();
     showToast(`📌 Ponto criado — <span class="accent">${lat.toFixed(5)}, ${lng.toFixed(5)}</span>`);
     results.style.display = 'none';
@@ -210,7 +235,13 @@ function removeCustomMarker(idx) {
 
     const coords  = parseCoords(q);
     const features = getAllKmlFeatures();
-    const kmlMatches = features.filter(f => f.searchText.toLowerCase().includes(q.toLowerCase())).slice(0, 30);
+    const ql = q.toLowerCase();
+    // Um código SGO digitado sem os zeros à esquerda ("3908") também precisa
+    // encontrar o registro gravado como "003908".
+    const qPadded = /^\d+$/.test(q) ? q.padStart(6, '0') : null;
+    const kmlMatches = features
+      .filter(f => f.haystack.includes(ql) || (qPadded && f.haystack.includes(qPadded)))
+      .slice(0, 30);
 
     // Search custom pontos
     const pontoMatches = _customMarkers
@@ -247,7 +278,7 @@ function removeCustomMarker(idx) {
     } else {
       html += kmlMatches.map((f, i) => {
         const meta = [f.props.sg_uf || f.props.Unidade_Federacao, f.sgo ? `SGO ${f.sgo}` : '', f.fileName]
-          .filter(Boolean).join(' · ');
+          .filter(Boolean).map(escapeHtml).join(' · ');
         const oaeHtml = f.oae ? `<div class="kml-result-meta" style="color:var(--accent);opacity:0.8;">${highlight(f.oae, q)}</div>` : '';
         return `<div class="kml-search-result-item" data-idx="${i}">
           <div class="kml-result-name">${highlight(f.name, q)}</div>
@@ -297,7 +328,14 @@ function removeCustomMarker(idx) {
     });
   }
 
-  input.addEventListener('input', e => search(e.target.value));
+  // Debounce curto: sem ele, cada tecla filtrava a lista inteira de novo.
+  const _searchDebounced = debounce(value => search(value), 120);
+  input.addEventListener('input', e => {
+    const v = e.target.value;
+    clearBtn.style.display = v ? 'block' : 'none';
+    if (!v) { results.style.display = 'none'; return; }
+    _searchDebounced(v);
+  });
   clearBtn.addEventListener('click', () => {
     input.value = '';
     results.style.display = 'none';

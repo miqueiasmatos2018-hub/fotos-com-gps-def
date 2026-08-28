@@ -252,7 +252,9 @@
       // The input declares min="1", but that's only enforced on form
       // submit/stepper -- typing "0" or "-5" directly still fires 'input'
       // with that value, which would produce zero/negative photo numbers.
-      startNumber = (isNaN(val) || val < 1) ? 1 : val;
+      // Também limita o teto: um valor colado gigante (ex. 1e9) fazia os
+      // rótulos dos círculos estourarem o diagrama.
+      startNumber = (isNaN(val) || val < 1) ? 1 : Math.min(val, 9999);
       saveJSON(START_NUMBER_KEY, startNumber);
       renderAll();
     });
@@ -325,24 +327,38 @@
     H: 'LD, apoio anterior (ou transição inicial)'
   };
 
-  function findFilled(tramoIdx, letter){
-    for (var i = 0; i < filled.length; i++){
-      if (filled[i].tramo === tramoIdx && filled[i].letter === letter) return filled[i];
-    }
-    return null;
+  function findAllFilled(tramoIdx, letter){
+    return filled.filter(function(f){ return f.tramo === tramoIdx && f.letter === letter; });
+  }
+
+  // Numeração inicial acima de 1 com muitas fotos: o número exibido é
+  // sempre posição na lista + numeração inicial, então remover um item do
+  // meio renumera todos os seguintes -- que é o comportamento desejado.
+
+
+  // Índice posição->número calculado uma vez por render. Antes cada círculo
+  // chamava filled.indexOf() para cada nome nele, varrendo a lista inteira:
+  // com muitos tramos e muitas fotos isso virava trabalho quadrático a cada
+  // clique.
+  var _filledIndex = null;
+  function rebuildFilledIndex(){
+    _filledIndex = new Map();
+    filled.forEach(function(f, i){ _filledIndex.set(f.id, i); });
   }
 
   function buildTramoDiagramHtml(tramoIdx){
     var markerId = 'nomesInfArrow' + tramoIdx;
     var badgesHtml = LETTER_ORDER.map(function(letter){
       var pos = LETTER_POS[letter];
-      var entry = findFilled(tramoIdx, letter);
-      var displayNum = entry ? String(filled.indexOf(entry) + startNumber) : '';
-      var filledClass = entry ? ' nomes-copied' : '';
+      var entries = findAllFilled(tramoIdx, letter);
+      var nums = entries.map(function(e){ return _filledIndex.get(e.id) + startNumber; });
+      var displayNum = nums.join(',');
+      var filledClass = entries.length ? ' nomes-copied' : '';
+      var multiClass = nums.length > 1 ? ' nomes-diagram-badge-text-multi' : '';
       return '<g class="nomes-diagram-badge nomes-inf-badge' + filledClass + '" data-tramo="' + tramoIdx + '" data-letter="' + letter + '" role="button" tabindex="0" aria-label="' + LETTER_TITLE[letter] + '">' +
         '<title>' + LETTER_TITLE[letter] + '</title>' +
         '<circle class="nomes-diagram-badge-circle" cx="' + pos.cx + '" cy="' + pos.cy + '" r="15"></circle>' +
-        '<text class="nomes-diagram-badge-text" x="' + pos.cx + '" y="' + pos.cy + '" dy="0.35em">' + displayNum + '</text>' +
+        '<text class="nomes-diagram-badge-text' + multiClass + '" x="' + pos.cx + '" y="' + pos.cy + '" dy="0.35em">' + displayNum + '</text>' +
       '</g>';
     }).join('');
 
@@ -362,6 +378,7 @@
   }
 
   function renderDiagrams(){
+    rebuildFilledIndex();
     var html = '';
     for (var i = 1; i <= tramoCount; i++) html += buildTramoDiagramHtml(i);
     diagramsEl.innerHTML = html;
@@ -370,7 +387,9 @@
   function handleInfBadgeActivate(badge){
     var tramoIdx = Number(badge.getAttribute('data-tramo'));
     var letter = badge.getAttribute('data-letter');
-    if (findFilled(tramoIdx, letter)) return; // já preenchido -- clique não faz nada
+    // Cada clique adiciona um novo número a esse ponto -- não é mais
+    // bloqueado depois do primeiro clique, então clicar várias vezes no
+    // mesmo círculo empilha vários nomes/números para aquele ponto.
     filled.push({ id: uid(), tramo: tramoIdx, letter: letter });
     saveFilled();
     renderAll();

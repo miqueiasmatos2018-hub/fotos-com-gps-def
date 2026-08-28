@@ -29,19 +29,31 @@ window.setSort = function(key, dir) {
   renderSortedList();
 };
 
+// Fonte única da data de uma foto. Antes existiam três leitores de data
+// levemente diferentes (aqui, na linha do tempo e na aba Dados), que
+// discordavam entre si em fotos que só tinham ModifyDate.
 function getPhotoDate(photo) {
   const raw = photo.exif?.DateTimeOriginal || photo.exif?.CreateDate
-           || photo.exif?.DateTime || photo.exif?.DateTimeDigitized;
+           || photo.exif?.DateTime || photo.exif?.DateTimeDigitized
+           || photo.exif?.ModifyDate;
   if (!raw) return null;
-  if (raw instanceof Date) return raw;
-  const m = String(raw).match(/(\d{4})[:\-](\d{2})[:\-](\d{2})/);
-  return m ? new Date(+m[1], +m[2]-1, +m[3]) : null;
+  if (raw instanceof Date) return isNaN(raw) ? null : raw;
+  const str = String(raw);
+  const m = str.match(/(\d{4})[:\/\-](\d{2})[:\/\-](\d{2})/);
+  if (!m) return null;
+  const t = str.match(/(\d{2}):(\d{2}):(\d{2})(?!\d)/g);
+  // O primeiro grupo "hh:mm:ss" só é hora se não for a própria data.
+  const time = t && t.length ? t[t.length - 1].split(':').map(Number) : [0, 0, 0];
+  const d = new Date(+m[1], +m[2] - 1, +m[3], time[0], time[1], time[2]);
+  return isNaN(d) ? null : d;
 }
 
 function renderSortedList() {
   const sorted = [...photos].sort((a, b) => {
     if (_sortKey === 'name') {
-      const cmp = a.name.localeCompare(b.name, 'pt', { sensitivity: 'base' });
+      // numeric:true -> "FOTO 2" antes de "FOTO 10" (antes vinha ao contrário,
+      // porque a comparação era puramente alfabética).
+      const cmp = a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base', numeric: true });
       return _sortDir === 'asc' ? cmp : -cmp;
     } else {
       // date
@@ -54,10 +66,17 @@ function renderSortedList() {
     }
   });
 
-  // Re-order DOM nodes (no re-render, just move existing elements)
+  // Reordena os nós já existentes (sem re-renderizar). Montar tudo em um
+  // DocumentFragment e inserir de uma vez evita um reflow por foto -- com
+  // algumas centenas de itens a diferença é visível.
   const list = document.getElementById('photoList');
+  if (!list) return;
+  const byId = new Map();
+  list.querySelectorAll('.photo-item[data-id]').forEach(el => byId.set(el.dataset.id, el));
+  const frag = document.createDocumentFragment();
   sorted.forEach(photo => {
-    const el = list.querySelector(`.photo-item[data-id="${photo.id}"]`);
-    if (el) list.appendChild(el);
+    const el = byId.get(String(photo.id));
+    if (el) frag.appendChild(el);
   });
+  list.appendChild(frag);
 }

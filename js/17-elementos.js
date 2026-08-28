@@ -694,7 +694,19 @@ Grand total: 128;;;;;;;;;;;;
 
   function readFile(file){
     var reader = new FileReader();
-    reader.onload = function(e){ loadCSVText(e.target.result, file.name); };
+    reader.onload = function(e){
+      var text = e.target.result;
+      // Alguns exports do SGE saem em ANSI/Windows-1252 em vez de UTF-8;
+      // lidos como UTF-8 eles viram "PAVIMENTO ASF�LTICO". O caractere de
+      // substituição denuncia isso, e aí relemos com a codificação certa.
+      if (text.indexOf('\uFFFD') !== -1){
+        var r2 = new FileReader();
+        r2.onload = function(ev){ loadCSVText(ev.target.result, file.name); };
+        r2.readAsText(file, 'windows-1252');
+        return;
+      }
+      loadCSVText(text, file.name);
+    };
     reader.readAsText(file, 'UTF-8');
   }
 
@@ -704,7 +716,9 @@ Grand total: 128;;;;;;;;;;;;
 
   document.getElementById('elemBtnChoose').addEventListener('click', function(){ fileInput.click(); });
   dropzone.addEventListener('click', function(e){
-    if (e.target.id === 'btnSample') return;
+    // O id verificado aqui era 'btnSample', que não existe mais desde que
+    // todos os ids desta aba ganharam o prefixo "elem".
+    if (e.target.closest('button')) return;
     fileInput.click();
   });
   fileInput.addEventListener('change', function(){

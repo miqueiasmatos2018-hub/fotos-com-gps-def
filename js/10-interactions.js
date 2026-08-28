@@ -9,6 +9,17 @@
 
 (function() {
   let _bearing = 0;
+  let _layerModeTimer = null;
+  let _lastLayerMode = false;
+
+  function _scheduleLayerModeSync(rotated) {
+    if (rotated === _lastLayerMode) return;
+    clearTimeout(_layerModeTimer);
+    _layerModeTimer = setTimeout(() => {
+      _lastLayerMode = rotated;
+      syncMarkerLayerMode(rotated);
+    }, 140);
+  }
 
   function setBearing(deg) {
     _bearing = ((deg % 360) + 360) % 360;
@@ -24,9 +35,11 @@
       try { map.setBearing(_bearing); } catch(e) {}
     }
 
-    // Bypass clustering while rotated so markers stay click-accurate
-    // (see syncMarkerLayerMode near the clusterGroup setup for why).
-    syncMarkerLayerMode(_bearing !== 0);
+    // Desativa o agrupamento enquanto o mapa está rotacionado, para os
+    // cliques continuarem caindo no marcador certo (ver syncMarkerLayerMode).
+    // A troca de camada é cara com muitos marcadores e era refeita a cada
+    // quadro do arrasto; agora só acontece quando o giro estabiliza.
+    _scheduleLayerModeSync(_bearing !== 0);
   }
 
   // Expose globally so other functions (SNV, etc.) can call it
@@ -52,24 +65,33 @@
     return Math.atan2(clientY - cy, clientX - cx) * 180 / Math.PI;
   }
 
-  rose.addEventListener('mousedown', e => {
-    e.preventDefault();
+  function startCompassDrag(e) {
+    if (e.cancelable) e.preventDefault();
     _dragMoved = false;
     _startAngle   = getAngle(e);
     _startBearing = window.getBearing();
 
-    function onDrag(e) {
-      const delta = getAngle(e) - _startAngle;
+    function onDrag(ev) {
+      const delta = getAngle(ev) - _startAngle;
       if (Math.abs(delta) > 2) _dragMoved = true;
       setBearing(_startBearing + delta);
+      if (ev.cancelable) ev.preventDefault();
     }
     function onUp() {
       document.removeEventListener('mousemove', onDrag);
       document.removeEventListener('mouseup',   onUp);
+      document.removeEventListener('touchmove', onDrag);
+      document.removeEventListener('touchend',  onUp);
     }
     document.addEventListener('mousemove', onDrag);
     document.addEventListener('mouseup',   onUp);
-  });
+    document.addEventListener('touchmove', onDrag, { passive: false });
+    document.addEventListener('touchend',  onUp);
+  }
+  // getAngle() já sabia lidar com toques, mas só havia listener de mouse --
+  // girar a rosa dos ventos em tablet não funcionava.
+  rose.addEventListener('mousedown', startCompassDrag);
+  rose.addEventListener('touchstart', startCompassDrag, { passive: false });
 
   // Click the N label or compass to reset — only if not dragging
   rose.addEventListener('click', e => {

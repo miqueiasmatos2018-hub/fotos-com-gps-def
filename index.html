@@ -1,23 +1,26 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>FOTOS COM GPS</title>
+<link rel="preconnect" href="https://unpkg.com" crossorigin>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Cinzel:wght@700;900&family=Cormorant+Garamond:wght@300;400;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.css"/>
 <link rel="stylesheet" href="styles.css">
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
-<script src="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/leaflet-rotate@0.2.8/dist/leaflet-rotate-src.js"></script>
-<script src="https://api.mapbox.com/mapbox.js/plugins/leaflet-omnivore/v0.3.1/leaflet-omnivore.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/exifr/dist/full.umd.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/piexifjs@1.0.6/piexif.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js" defer></script>
+<script src="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/leaflet-rotate@0.2.8/dist/leaflet-rotate-src.js" defer></script>
+<script src="https://api.mapbox.com/mapbox.js/plugins/leaflet-omnivore/v0.3.1/leaflet-omnivore.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/exifr/dist/full.umd.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/piexifjs@1.0.6/piexif.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js" defer></script>
 </head>
 <body>
 
@@ -32,13 +35,13 @@
     <button class="top-tab-btn active" id="tabPhotos" onclick="switchTab('photos')"><span class="top-tab-icon">📷</span>Fotos</button>
     <button class="top-tab-btn" id="tabPontos" onclick="switchTab('pontos')"><span class="top-tab-icon">📌</span>Pontos</button>
     <button class="top-tab-btn" id="tabRotas" onclick="switchTab('rotas')"><span class="top-tab-icon">🛣</span>Rotas</button>
-    <button class="top-tab-btn" id="tabMedidas" onclick="switchTab('medidas')"><span class="top-tab-icon">📏</span>Medidas</button>
+    <button class="top-tab-btn" id="tabMedidas" onclick="switchTab('medidas')"><span class="top-tab-icon">📏</span>Dados</button>
     <button class="top-tab-btn" id="tabElementos" onclick="switchTab('elementos')"><span class="top-tab-icon">🧱</span>Elementos</button>
     <button class="top-tab-btn" id="tabNomes" onclick="switchTab('nomes')"><span class="top-tab-icon">🏷</span>Nomes</button>
   </nav>
   <div class="header-meta">
-    Photo Metadata Explorer<br>
-    GPS · EXIF · Location
+    Fotos, GPS e Metadados<br>
+    GPS · EXIF · Localização
   </div>
 </header>
 
@@ -51,7 +54,7 @@
     </div>
     <div class="date-timeline-header">DATAS</div>
     <div class="date-timeline" id="dateTimeline">
-      <div class="date-timeline-empty">NEHUMA FOTO ADICIONADA</div>
+      <div class="date-timeline-empty">NENHUMA FOTO ADICIONADA</div>
     </div>
 
     <div class="progress-bar">
@@ -196,10 +199,12 @@
         <button class="route-result-copy" id="routeCopyDiffBtn" onclick="copyRouteDiffKm()" title="Copiar diferença">Copiar</button>
       </div>
       <button class="btn-export route-export-btn" id="routeExportBtn" onclick="exportRoutesKML()">⬇ EXPORTAR ROTAS (KML)</button>
+      <button class="btn-export route-export-btn" id="routeImageBtn" onclick="exportRoutesImage()">🖼️ GERAR IMAGEM (JPG)</button>
     </div>
 
     <div class="tab-content" id="tabContentMedidas">
       <div class="medidas-intro">Solte um KML com pontos <b>LD_INICIO_OAE</b>, <b>LE_INICIO_OAE</b>, <b>LD_FINAL_OAE</b> e <b>LE_FINAL_OAE</b> (ou as variações "PONTE") para calcular a estrutura.</div>
+      <div class="medidas-row medidas-global-row"><span>Data Inspeção</span><b id="medidasInspectionDate">—</b></div>
       <div class="medidas-empty" id="medidasEmpty">Nenhuma estrutura identificada ainda</div>
       <div class="medidas-list" id="medidasList"></div>
     </div>
@@ -389,15 +394,15 @@
     </div>
 
     <div class="export-bar" id="exportBar">
-      <button class="btn-export-single" id="exportSingleBtn" onclick="exportSingle()" title="Export selected photo as JPG">↓ SELECIONADO</button>
-      <button class="btn-export" id="exportAllBtn" onclick="exportAllSmart()">⬇ EXPORTAR TUDO → fotos renomeadas.zip</button>
+      <button class="btn-export-single" id="exportSelectedBtn" onclick="exportSelectedPhotos()" style="display:none;" title="Baixar as fotos marcadas com a caixinha">⬇ BAIXAR SELECIONADAS (<span id="selectedPhotosCount">0</span>)</button>
+      <button class="btn-export" id="exportAllBtn" onclick="exportAllSmart()">⬇ EXPORTAR TUDO</button>
     </div>
   </div>
 
   <div class="map-container">
     <div class="empty-map" id="emptyState">
-      <div class="empty-map-text">UPLOAD<br>FOTOS</div>
-      <div class="empty-map-sub">GPS coordinates will appear on map</div>
+      <div class="empty-map-text">ENVIAR<br>FOTOS</div>
+      <div class="empty-map-sub">As coordenadas de GPS aparecerão no mapa</div>
     </div>
     <div class="map-search-bar">
       <div class="map-search-pill">
@@ -429,7 +434,7 @@
 </div>
 
 
-<div class="picking-banner" id="pickingBanner">📍 Click on map to set new location &nbsp;·&nbsp; ESC to cancel</div>
+<div class="picking-banner" id="pickingBanner">📍 Clique no mapa para definir a nova localização &nbsp;·&nbsp; ESC para cancelar</div>
 
 
 
@@ -445,7 +450,7 @@
     </div>
 
     <!-- COMPASS ROSE -->
-    <div class="compass-rose" id="compassRose" title="Drag to rotate · Click to reset">
+    <div class="compass-rose" id="compassRose" title="Arraste para girar · Clique para voltar ao norte">
       <svg viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg" class="compass-svg">
         <!-- Outer ring -->
         <circle cx="40" cy="40" r="38" fill="rgba(10,10,10,0.75)" stroke="rgba(212,245,60,0.3)" stroke-width="1"/>
@@ -467,9 +472,9 @@
 
     <!-- ROTATE CONTROLS -->
     <div class="rotate-controls">
-      <button class="rotate-btn" id="rotateLeft"  title="Rotate left 15°">↺</button>
-      <button class="rotate-btn reset" id="rotateReset" title="Reset north">⊕</button>
-      <button class="rotate-btn" id="rotateRight" title="Rotate right 15°">↻</button>
+      <button class="rotate-btn" id="rotateLeft"  title="Girar 15° à esquerda">↺</button>
+      <button class="rotate-btn reset" id="rotateReset" title="Voltar ao norte">⊕</button>
+      <button class="rotate-btn" id="rotateRight" title="Girar 15° à direita">↻</button>
     </div>
 
     <div class="map-overlay">
@@ -588,8 +593,8 @@
 <!-- EXPORT OVERLAY -->
 <div class="export-overlay" id="exportOverlay">
   <div class="export-overlay-box">
-    <div class="export-overlay-title">EXPORTING</div>
-    <div class="export-overlay-sub" id="exportOverlaySub">Preparing photos...</div>
+    <div class="export-overlay-title">EXPORTANDO</div>
+    <div class="export-overlay-sub" id="exportOverlaySub">Preparando as fotos...</div>
     <div class="export-progress-bar">
       <div class="export-progress-fill" id="exportProgressFill"></div>
     </div>
@@ -607,25 +612,25 @@
      LOAD ORDER MATTERS. The files are numbered; keep them in this order.
      Concatenating them in this order reproduces the original program.
      =========================================================================== -->
-<script src="js/00-core.js"></script>
-<script src="js/01-map-core.js"></script>
-<script src="js/02-orientation-layers.js"></script>
-<script src="js/03-state.js"></script>
-<script src="js/04-photos.js"></script>
-<script src="js/05-photo-markers.js"></script>
-<script src="js/06-export.js"></script>
-<script src="js/07-map-ui.js"></script>
-<script src="js/08-kml.js"></script>
-<script src="js/09-tabs-bulk.js"></script>
-<script src="js/10-interactions.js"></script>
-<script src="js/11-photo-fixes.js"></script>
-<script src="js/12-search-pontos.js"></script>
-<script src="js/13-sorting.js"></script>
-<script src="js/14-tools.js"></script>
-<script src="js/15-routes.js"></script>
-<script src="js/16-medidas.js"></script>
-<script src="js/17-elementos.js"></script>
-<script src="js/18-nomes.js"></script>
-<script src="js/19-boot.js"></script>
+<script src="js/00-core.js" defer></script>
+<script src="js/01-map-core.js" defer></script>
+<script src="js/02-orientation-layers.js" defer></script>
+<script src="js/03-state.js" defer></script>
+<script src="js/04-photos.js" defer></script>
+<script src="js/05-photo-markers.js" defer></script>
+<script src="js/06-export.js" defer></script>
+<script src="js/07-map-ui.js" defer></script>
+<script src="js/08-kml.js" defer></script>
+<script src="js/09-tabs-bulk.js" defer></script>
+<script src="js/10-interactions.js" defer></script>
+<script src="js/11-photo-fixes.js" defer></script>
+<script src="js/12-search-pontos.js" defer></script>
+<script src="js/13-sorting.js" defer></script>
+<script src="js/14-tools.js" defer></script>
+<script src="js/15-routes.js" defer></script>
+<script src="js/16-medidas.js" defer></script>
+<script src="js/17-elementos.js" defer></script>
+<script src="js/18-nomes.js" defer></script>
+<script src="js/19-boot.js" defer></script>
 </body>
 </html>

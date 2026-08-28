@@ -512,12 +512,18 @@ window.useGreenRoutePoints = async function() {
   let best = null;
 
   for (const frac of offsetFractions) {
-    const offsetKm = Math.max(straightKm * frac, 5); // never less than a 5km push
-    for (const side of [1, -1]) {
+    const offsetKm = Math.max(straightKm * frac, 5); // nunca menos que 5km de desvio
+    // Os dois lados eram consultados um depois do outro: até 8 idas ao OSRM
+    // em série. Em paralelo o tempo de espera cai praticamente à metade.
+    const sides = [1, -1].map(side => {
       const via = _perpendicularOffsetPoint(first, last, offsetKm, side);
-      const result = await _fetchOsrmRoute([first, via, last]);
-      if (!result) continue;
+      return _fetchOsrmRoute([first, via, last]).then(result => (result ? { via, result } : null));
+    });
+    const settled = await Promise.all(sides);
 
+    for (const entry of settled) {
+      if (!entry) continue;
+      const { via, result } = entry;
       const overlap = _routeOverlapFraction(result.coords, greenCoords, ROUTE_OVERLAP_THRESHOLD_KM);
       const candidate = {
         via, coords: result.coords, distanceKm: result.distanceKm,
@@ -785,6 +791,686 @@ ${routePlacemarks}${routePlacemarks && ldPlacemarks ? '\n' : ''}${ldPlacemarks}
   showToast(`⬇ <span class="accent">${parts.join(' + ')}</span> exportado(s)`);
 };
 
+// ─── STATIC ROUTE IMAGE (JPG) ──────────────────────────────────────────────
+// Composes a single satellite-imagery JPG with both routes, the
+// LD_INICIO_OAE marker, a title block, a legend, a north arrow and a scale
+// bar -- modeled after the Google Earth Pro-style export the person already
+// uses (see the reference image they shared).
+//
+// Uses Esri's public World_Imagery export service instead of the app's own
+// Google satellite tiles: Google's tile server doesn't send CORS headers,
+// which would leave the canvas "tainted" and block canvas.toBlob() with a
+// SecurityError. Esri's ArcGIS Online export endpoint does allow anonymous
+// cross-origin reads, which is what makes drawing it into a canvas (and
+// then exporting that canvas as a JPG) possible at all client-side.
+const ROUTE_IMAGE_WIDTH = 2000;
+const ROUTE_IMAGE_HEIGHT = 1250; // ~16:10, matching the reference export's proportions
+const ROUTE_IMAGE_PADDING_FRACTION = 0.12; // breathing room around the routes/marker
+const ESRI_WORLD_IMAGERY_EXPORT_URL = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export';
+// Road tracing + labels (BR-xxx, RR-xxx...) are drawn ourselves from OSM
+// data (via Overpass) instead of using Esri's Reference/World_Transportation
+// raster overlay: that overlay is a pre-rendered cartographic layer whose
+// label size is baked into the image at whatever real-world scale the
+// requested bbox implies -- so for a route spanning 150km+, the labels
+// come out tiny no matter how high a "dpi" is requested (dpi doesn't undo
+// that; it's a cached/tiled service, not a service that re-symbolizes on
+// demand). Drawing the labels ourselves as fixed-pixel-size text keeps
+// them exactly as legible as the LD_INICIO_OAE label or the legend text,
+// regardless of how much real-world distance the frame covers -- the same
+// "same size at any zoom" property already true of the app's own map.
+const OVERPASS_ROAD_LABEL_ENDPOINTS = [
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter'
+];
+const ROAD_LABEL_MIN_SPACING_PX = 260; // per ref, so a long highway gets repeated labels, not a cluster
+
+// Spherical Web Mercator (EPSG:3857) -- the projection both Esri's and
+// Google's tile services use, so projecting our own lat/lng points into it
+// lines them up correctly with the fetched satellite image.
+function _lngLatToMercatorXY(lng, lat) {
+  const R = 6378137;
+  const x = lng * Math.PI / 180 * R;
+  const y = Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI / 180) / 2)) * R;
+  return { x, y };
+}
+
+function _mercatorYToLat(y) {
+  const R = 6378137;
+  return (2 * Math.atan(Math.exp(y / R)) - Math.PI / 2) * 180 / Math.PI;
+}
+
+function _mercatorXToLng(x) {
+  const R = 6378137;
+  return x / R * 180 / Math.PI;
+}
+
+// Fetches OSM ways carrying a route-number ref inside the given (Mercator)
+// bbox -- the raw material for drawing our own road tracing + labels.
+// No highway-class restriction here anymore (motorway/primary/secondary
+// only ended up excluding real state highways that OSM happens to tag as
+// tertiary/unclassified in this region) -- classification turned out to be
+// an unreliable way to tell "federal/state" from "municipal/vicinal"
+// apart. The actual filter is proximity to the routes themselves, applied
+// afterward in _filterRoadWaysNearRoute(): a road is only federal/state
+// *and relevant* here if the trip's own route actually runs along it.
+// Tries a second Overpass mirror if the first one fails/times out.
+async function _fetchRoadRefWaysInBBox(bbox) {
+  const south = _mercatorYToLat(bbox.ymin);
+  const north = _mercatorYToLat(bbox.ymax);
+  const west = _mercatorXToLng(bbox.xmin);
+  const east = _mercatorXToLng(bbox.xmax);
+  const query = `[out:json][timeout:25];way(${south},${west},${north},${east})[highway][ref];out tags geom;`;
+
+  let lastErr = null;
+  for (const endpoint of OVERPASS_ROAD_LABEL_ENDPOINTS) {
+    try {
+      const res = await fetch(`${endpoint}?data=${encodeURIComponent(query)}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const ways = data.elements || [];
+      // Keep only refs that actually look like a Brazilian federal/state
+      // route number (e.g. "BR-174", "RR-203") -- filters out things like
+      // a local road's own name or a cycle-route ref sharing the `ref` tag.
+      return ways.filter(w => w.tags && /^[A-Z]{2,3}-?\s?\d/.test(String(w.tags.ref || '').trim()));
+    } catch (err) {
+      lastErr = err;
+      console.warn(`Overpass road lookup failed (${endpoint}):`, err);
+    }
+  }
+  throw lastErr || new Error('Todos os espelhos do Overpass falharam');
+}
+
+const ROAD_NEAR_ROUTE_THRESHOLD_KM = 0.1; // ~100m -- generous enough for OSM/OSRM alignment slack, tight enough to exclude a parallel road
+const ROAD_NEAR_ROUTE_GRID_CELL_DEG = 0.001; // ~110m cells -- close to the threshold itself
+
+// Buckets route points into a lat/lng grid so "is there a route point near
+// (lat,lng)" is a lookup in ~9 cells instead of a scan of every route point.
+function _buildRouteProximityGrid(routePts) {
+  const grid = new Map();
+  routePts.forEach(p => {
+    const key = `${Math.floor(p.lat / ROAD_NEAR_ROUTE_GRID_CELL_DEG)},${Math.floor(p.lng / ROAD_NEAR_ROUTE_GRID_CELL_DEG)}`;
+    if (!grid.has(key)) grid.set(key, []);
+    grid.get(key).push(p);
+  });
+  return grid;
+}
+
+function _isPointNearRoute(grid, lat, lng) {
+  const cellLat = Math.floor(lat / ROAD_NEAR_ROUTE_GRID_CELL_DEG);
+  const cellLng = Math.floor(lng / ROAD_NEAR_ROUTE_GRID_CELL_DEG);
+  for (let dLat = -1; dLat <= 1; dLat++) {
+    for (let dLng = -1; dLng <= 1; dLng++) {
+      const pts = grid.get(`${cellLat + dLat},${cellLng + dLng}`);
+      if (!pts) continue;
+      for (const p of pts) {
+        if (_haversineKm(lat, lng, p.lat, p.lng) <= ROAD_NEAR_ROUTE_THRESHOLD_KM) return true;
+      }
+    }
+  }
+  return false;
+}
+
+// Splits a way's geometry into the contiguous sub-segments that actually
+// run near the route, dropping the rest. This is the fix for a whole way
+// getting pulled in just because it *crosses* the route at one point (a
+// perpendicular side road sharing one node with the route, but running off
+// on its own for kilometres in either direction) -- only the portion of
+// the way that genuinely runs alongside the route is kept, so its label
+// and line no longer end up on an unrelated stretch of a crossing road.
+// Segments of a single touching point (length 1) are discarded.
+function _extractNearRouteSegments(way, grid) {
+  if (!way.geometry || way.geometry.length < 2) return [];
+  const segments = [];
+  let current = null;
+  way.geometry.forEach(pt => {
+    if (_isPointNearRoute(grid, pt.lat, pt.lon)) {
+      if (!current) current = [];
+      current.push(pt);
+    } else if (current) {
+      segments.push(current);
+      current = null;
+    }
+  });
+  if (current) segments.push(current);
+  return segments.filter(seg => seg.length >= 2);
+}
+
+// Replaces every way with just its near-route segments (see above), and
+// drops ways left with none -- the real "federal/state, not
+// municipal/vicinal" filter: if the trip's own route (which already
+// follows the real road network) runs along a given road, that road is
+// relevant regardless of how OSM happens to classify it. Returns
+// {tags, segments} pairs ready for drawing, not raw OSM ways.
+function _filterRoadWaysNearRoute(ways, routePts) {
+  if (!routePts.length) return [];
+  const grid = _buildRouteProximityGrid(routePts);
+  const result = [];
+  ways.forEach(way => {
+    const segments = _extractNearRouteSegments(way, grid);
+    if (segments.length) result.push({ tags: way.tags, segments });
+  });
+  return result;
+}
+
+// Bounding box (in EPSG:3857 metres) that fits every given {lat,lng} point,
+// padded, then stretched to the export's aspect ratio so the satellite
+// image isn't distorted.
+function _computeMercatorBBoxForImage(points) {
+  const merc = points.map(p => _lngLatToMercatorXY(p.lng, p.lat));
+  let xmin = Math.min(...merc.map(m => m.x));
+  let xmax = Math.max(...merc.map(m => m.x));
+  let ymin = Math.min(...merc.map(m => m.y));
+  let ymax = Math.max(...merc.map(m => m.y));
+
+  // Guards against a degenerate span (e.g. a single point, or a route
+  // running near-perfectly north-south/east-west) so the padding/aspect
+  // math below never divides by ~0.
+  const MIN_SPAN_M = 300;
+  if (xmax - xmin < MIN_SPAN_M) { const cx = (xmin + xmax) / 2; xmin = cx - MIN_SPAN_M / 2; xmax = cx + MIN_SPAN_M / 2; }
+  if (ymax - ymin < MIN_SPAN_M) { const cy = (ymin + ymax) / 2; ymin = cy - MIN_SPAN_M / 2; ymax = cy + MIN_SPAN_M / 2; }
+
+  const padX = (xmax - xmin) * ROUTE_IMAGE_PADDING_FRACTION;
+  const padY = (ymax - ymin) * ROUTE_IMAGE_PADDING_FRACTION;
+  xmin -= padX; xmax += padX; ymin -= padY; ymax += padY;
+
+  const targetRatio = ROUTE_IMAGE_WIDTH / ROUTE_IMAGE_HEIGHT;
+  const curRatio = (xmax - xmin) / (ymax - ymin);
+  if (curRatio > targetRatio) {
+    const newH = (xmax - xmin) / targetRatio;
+    const cy = (ymin + ymax) / 2;
+    ymin = cy - newH / 2; ymax = cy + newH / 2;
+  } else {
+    const newW = (ymax - ymin) * targetRatio;
+    const cx = (xmin + xmax) / 2;
+    xmin = cx - newW / 2; xmax = cx + newW / 2;
+  }
+
+  return { xmin, ymin, xmax, ymax };
+}
+
+async function _fetchEsriMapImage(serviceUrl, bbox, width, height, extraParams) {
+  const params = new URLSearchParams(Object.assign({
+    bbox: `${bbox.xmin},${bbox.ymin},${bbox.xmax},${bbox.ymax}`,
+    bboxSR: '3857',
+    imageSR: '3857',
+    size: `${width},${height}`,
+    format: 'jpg',
+    f: 'image'
+  }, extraParams || {}));
+  const res = await fetch(`${serviceUrl}?${params.toString()}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const blob = await res.blob();
+  const objUrl = URL.createObjectURL(blob);
+  try {
+    return await new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error('Falha ao decodificar a imagem'));
+      img.src = objUrl;
+    });
+  } finally {
+    URL.revokeObjectURL(objUrl);
+  }
+}
+
+// All the decorative overlay functions below were tuned by eye at
+// 1600x1000; this scales their fixed pixel sizes (fonts, padding, icon
+// radii...) proportionally at other output sizes so the layout keeps the
+// same proportions instead of shrinking relative to the image as
+// ROUTE_IMAGE_WIDTH changes.
+const ROUTE_IMAGE_UI_SCALE = ROUTE_IMAGE_WIDTH / 1600;
+
+function _drawRoundedRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+// Simple map-pin shape (triangular tail + circular head), anchored so
+// (x, y) is the exact ground point -- matches the "pushpin" marker style
+// used for LD_INICIO_OAE in the reference export.
+function _drawPinMarker(ctx, x, y, colorHex) {
+  const s = ROUTE_IMAGE_UI_SCALE;
+  const r = 8 * s, tail = 11 * s;
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.lineTo(x - r * 0.6, y - tail);
+  ctx.lineTo(x + r * 0.6, y - tail);
+  ctx.closePath();
+  ctx.fillStyle = colorHex;
+  ctx.fill();
+  ctx.lineWidth = 1.5 * s;
+  ctx.strokeStyle = '#000';
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.arc(x, y - tail, r, 0, Math.PI * 2);
+  ctx.fillStyle = colorHex;
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.arc(x, y - tail, r * 0.35, 0, Math.PI * 2);
+  ctx.fillStyle = '#000';
+  ctx.fill();
+  ctx.restore();
+}
+
+function _drawRouteImageLabel(ctx, x, y, text) {
+  const s = ROUTE_IMAGE_UI_SCALE;
+  const fontSize = 13 * s, padX = 6 * s, padY = 3 * s;
+  ctx.font = `${fontSize}px sans-serif`;
+  const w = ctx.measureText(text).width + padX * 2;
+  const h = fontSize + padY * 2;
+  ctx.fillStyle = 'rgba(255,255,255,0.9)';
+  _drawRoundedRect(ctx, x, y - h / 2, w, h, 3 * s);
+  ctx.fill();
+  ctx.fillStyle = '#000';
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'left';
+  ctx.fillText(text, x + padX, y);
+}
+
+// Highway "shield" pill, e.g. "BR-174" / "RR-203" -- fixed pixel font size
+// (scaled only by ROUTE_IMAGE_UI_SCALE, never by real-world distance), so
+// it stays exactly as legible whether the frame covers 30km or 300km.
+// Centered on (x, y), matching where a road-name pill sits on the road
+// itself in the reference export.
+function _drawRoadRefLabel(ctx, x, y, text) {
+  const s = ROUTE_IMAGE_UI_SCALE;
+  const fontSize = 15 * s, padX = 7 * s, padY = 4 * s;
+  ctx.font = `bold ${fontSize}px sans-serif`;
+  const w = ctx.measureText(text).width + padX * 2;
+  const h = fontSize + padY * 2;
+  ctx.fillStyle = 'rgba(255,255,255,0.94)';
+  _drawRoundedRect(ctx, x - w / 2, y - h / 2, w, h, 3 * s);
+  ctx.fill();
+  ctx.lineWidth = 1 * s;
+  ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+  ctx.stroke();
+  ctx.fillStyle = '#000';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, x, y);
+}
+
+// Draws each near-route segment's line (thin, pale) -- called before our
+// own route lines so our routes stand out on top of it.
+function _drawRoadRefLines(ctx, roadEntries, project) {
+  const s = ROUTE_IMAGE_UI_SCALE;
+  roadEntries.forEach(entry => {
+    entry.segments.forEach(seg => {
+      if (seg.length < 2) return;
+      ctx.beginPath();
+      seg.forEach((pt, i) => {
+        const [px, py] = project(pt.lat, pt.lon);
+        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      });
+      ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+      ctx.lineWidth = 2 * s;
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      ctx.stroke();
+    });
+  });
+}
+
+// Draws one shield label per near-route segment (so a long highway made of
+// many such segments gets repeated labels along its length, same as the
+// reference export) -- skipping a label when it would land too close to
+// another already placed for the same ref, so a road split into many tiny
+// segments doesn't cluster labels. Called after our own route lines so
+// labels stay legible even where a route runs right along that road.
+function _drawRoadRefShieldLabels(ctx, roadEntries, project) {
+  const s = ROUTE_IMAGE_UI_SCALE;
+  const placedByRef = {}; // ref -> array of [px, py] already placed
+
+  roadEntries.forEach(entry => {
+    const ref = (entry.tags && entry.tags.ref) ? String(entry.tags.ref).split(';')[0].trim() : null;
+    if (!ref) return;
+
+    entry.segments.forEach(seg => {
+      if (seg.length < 2) return;
+      const mid = seg[Math.floor(seg.length / 2)];
+      const [px, py] = project(mid.lat, mid.lon);
+
+      const placed = placedByRef[ref] || (placedByRef[ref] = []);
+      const tooClose = placed.some(([qx, qy]) => Math.hypot(px - qx, py - qy) < ROAD_LABEL_MIN_SPACING_PX * s);
+      if (tooClose) return;
+
+      placed.push([px, py]);
+      _drawRoadRefLabel(ctx, px, py, ref);
+    });
+  });
+}
+
+// Title block, top-left -- the obra code (reusing the same nameMiddle field
+// already typed into the route name inputs / used for KML naming).
+function _drawRouteImageTitle(ctx, code) {
+  const s = ROUTE_IMAGE_UI_SCALE;
+  const x = 16 * s, y = 16 * s, w = 280 * s, h = 56 * s;
+  ctx.save();
+  ctx.fillStyle = 'rgba(255,255,255,0.92)';
+  _drawRoundedRect(ctx, x, y, w, h, 4 * s);
+  ctx.fill();
+  ctx.fillStyle = '#1a1a1a';
+  ctx.font = `bold ${22 * s}px sans-serif`;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.fillText(code || 'OAE', x + 12 * s, y + 8 * s);
+  ctx.fillStyle = '#555';
+  ctx.font = `${12 * s}px sans-serif`;
+  ctx.fillText('Rota Alternativa × Rota Original', x + 12 * s, y + 34 * s);
+  ctx.restore();
+}
+
+// Legend, top-right -- one row per route actually built, plus LD_INICIO_OAE
+// if at least one such point was found in a dropped KML.
+function _drawRouteImageLegend(ctx, readyEntries, hasLdPoint) {
+  const s = ROUTE_IMAGE_UI_SCALE;
+  const rows = [];
+  if (hasLdPoint) rows.push({ type: 'pin', color: LD_INICIO_COLOR, label: 'LD_INICIO_OAE' });
+  readyEntries.forEach(([key, r]) => rows.push({ type: 'line', color: r.color, label: _composeRouteName(key) }));
+  if (!rows.length) return;
+
+  const padX = 12 * s, padY = 10 * s, titleH = 24 * s, rowH = 22 * s;
+  ctx.font = `${12 * s}px sans-serif`;
+  let maxTextW = 0;
+  rows.forEach(row => { maxTextW = Math.max(maxTextW, ctx.measureText(row.label).width); });
+  ctx.font = `bold ${14 * s}px sans-serif`;
+  maxTextW = Math.max(maxTextW, ctx.measureText('Legenda').width);
+
+  const boxW = padX * 2 + 24 * s + maxTextW;
+  const boxH = padY * 2 + titleH + rows.length * rowH;
+  const boxX = ROUTE_IMAGE_WIDTH - boxW - 16 * s;
+  const boxY = 16 * s;
+
+  ctx.save();
+  ctx.fillStyle = 'rgba(255,255,255,0.92)';
+  _drawRoundedRect(ctx, boxX, boxY, boxW, boxH, 4 * s);
+  ctx.fill();
+
+  ctx.fillStyle = '#1a1a1a';
+  ctx.font = `bold ${14 * s}px sans-serif`;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.fillText('Legenda', boxX + padX, boxY + padY);
+
+  let rowY = boxY + padY + titleH;
+  ctx.font = `${12 * s}px sans-serif`;
+  rows.forEach(row => {
+    const iconCX = boxX + padX + 8 * s;
+    const iconCY = rowY + rowH / 2;
+    if (row.type === 'pin') {
+      ctx.beginPath();
+      ctx.arc(iconCX, iconCY, 6 * s, 0, Math.PI * 2);
+      ctx.fillStyle = row.color;
+      ctx.fill();
+      ctx.lineWidth = 1 * s;
+      ctx.strokeStyle = '#000';
+      ctx.stroke();
+    } else {
+      ctx.strokeStyle = row.color;
+      ctx.lineWidth = 4 * s;
+      ctx.beginPath();
+      ctx.moveTo(iconCX - 8 * s, iconCY);
+      ctx.lineTo(iconCX + 8 * s, iconCY);
+      ctx.stroke();
+    }
+    ctx.fillStyle = '#1a1a1a';
+    ctx.fillText(row.label, boxX + padX + 24 * s, rowY + (rowH - 12 * s) / 2);
+    rowY += rowH;
+  });
+  ctx.restore();
+}
+
+// North arrow, bottom-right -- "N" sits in the upper part of the circle,
+// with the arrow (pointing up, toward the N) below it, both fully inside
+// the circle.
+function _drawRouteImageNorthArrow(ctx, width, height) {
+  const s = ROUTE_IMAGE_UI_SCALE;
+  const cx = width - 50 * s, cy = height - 60 * s;
+  const R = 28 * s;
+  ctx.save();
+  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  ctx.beginPath();
+  ctx.arc(cx, cy, R, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.lineWidth = 1.5 * s;
+  ctx.strokeStyle = '#333';
+  ctx.stroke();
+
+  ctx.fillStyle = '#000';
+  ctx.font = `bold ${13 * s}px sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillText('N', cx, cy - R * 0.35);
+
+  const tipY = cy - R * 0.05, baseY = cy + R * 0.55, halfW = R * 0.3;
+  ctx.beginPath();
+  ctx.moveTo(cx, tipY);
+  ctx.lineTo(cx - halfW, baseY);
+  ctx.lineTo(cx, baseY - halfW * 0.4);
+  ctx.lineTo(cx + halfW, baseY);
+  ctx.closePath();
+  ctx.fillStyle = '#c0392b';
+  ctx.fill();
+  ctx.lineWidth = 1 * s;
+  ctx.strokeStyle = '#000';
+  ctx.stroke();
+  ctx.restore();
+}
+
+function _niceScaleNumber(x) {
+  if (x <= 0) return 1;
+  const exp = Math.floor(Math.log10(x));
+  const base = x / Math.pow(10, exp);
+  const niceBase = base < 1.5 ? 1 : base < 3.5 ? 2 : base < 7.5 ? 5 : 10;
+  return niceBase * Math.pow(10, exp);
+}
+
+// Scale bar, bottom-left. Web Mercator stretches distances by latitude, so
+// the "map metres per pixel" from the bbox is corrected by cos(latitude)
+// at the frame's vertical centre to get an actual ground distance.
+function _drawRouteImageScaleBar(ctx, bbox, width, height) {
+  const s = ROUTE_IMAGE_UI_SCALE;
+  const mapMetersPerPixel = (bbox.xmax - bbox.xmin) / width;
+  const centerLat = _mercatorYToLat((bbox.ymin + bbox.ymax) / 2);
+  const groundMetersPerPixel = mapMetersPerPixel * Math.cos(centerLat * Math.PI / 180);
+
+  const niceKm = _niceScaleNumber((150 * s * groundMetersPerPixel) / 1000);
+  const barPx = (niceKm * 1000) / groundMetersPerPixel;
+
+  const x0 = 24 * s, y0 = height - 30 * s;
+  ctx.save();
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 3 * s;
+  ctx.beginPath();
+  ctx.moveTo(x0, y0); ctx.lineTo(x0 + barPx, y0);
+  ctx.moveTo(x0, y0 - 5 * s); ctx.lineTo(x0, y0 + 5 * s);
+  ctx.moveTo(x0 + barPx, y0 - 5 * s); ctx.lineTo(x0 + barPx, y0 + 5 * s);
+  ctx.stroke();
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = 1.5 * s;
+  ctx.beginPath();
+  ctx.moveTo(x0, y0); ctx.lineTo(x0 + barPx, y0);
+  ctx.moveTo(x0, y0 - 5 * s); ctx.lineTo(x0, y0 + 5 * s);
+  ctx.moveTo(x0 + barPx, y0 - 5 * s); ctx.lineTo(x0 + barPx, y0 + 5 * s);
+  ctx.stroke();
+
+  const label = `${niceKm} km`;
+  ctx.font = `${12 * s}px sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.lineWidth = 3 * s;
+  ctx.strokeStyle = '#000';
+  ctx.strokeText(label, x0 + barPx / 2, y0 - 8 * s);
+  ctx.fillStyle = '#fff';
+  ctx.fillText(label, x0 + barPx / 2, y0 - 8 * s);
+  ctx.restore();
+}
+
+function _drawRouteImageAttribution(ctx, width, height) {
+  const s = ROUTE_IMAGE_UI_SCALE;
+  ctx.save();
+  ctx.font = `${10 * s}px sans-serif`;
+  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'bottom';
+  ctx.fillText('Imagery © Esri, Maxar, Earthstar Geographics · Roads © OpenStreetMap contributors', 10 * s, height - 8 * s);
+  ctx.restore();
+}
+
+window.exportRoutesImage = async function() {
+  const ready = Object.entries(ROUTES).filter(([, r]) => r.waypoints.length >= 2);
+  if (!ready.length) {
+    showToast('Crie ao menos uma rota antes de gerar a imagem');
+    return;
+  }
+
+  const btn = document.getElementById('routeImageBtn');
+  // Guarda o rótulo original no próprio elemento: dois cliques seguidos
+  // (ou um erro no meio) faziam o botão ficar preso em "GERANDO IMAGEM…".
+  const originalLabel = btn ? (btn.dataset.label || btn.textContent) : null;
+  if (btn) btn.dataset.label = originalLabel;
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ GERANDO IMAGEM…'; }
+  showToast('🛰️ Buscando imagem de satélite…');
+
+  try {
+    const routePts = [];
+    ready.forEach(([, r]) => {
+      const coords = (r.roadCoords && r.roadCoords.length >= 2) ? r.roadCoords : r.waypoints;
+      coords.forEach(c => routePts.push({ lat: c.lat, lng: c.lng }));
+    });
+
+    const allPoints = routePts.slice();
+    LD_INICIO_POINTS.forEach(p => allPoints.push(p));
+
+    const bbox = _computeMercatorBBoxForImage(allPoints);
+
+    // Whitelist de códigos de rodovia: exatamente as que alguma das rotas
+    // construídas realmente percorre. Calculado na hora (mesma conta do
+    // campo TRAJETO:) em vez de ler o texto atual desse campo, para não
+    // pegá-lo no meio do "…" (ainda calculando).
+    //
+    // CORREÇÃO: a versão anterior olhava só para a Rota Alternativa (chave
+    // 'a'). Se a pessoa tivesse desenhado apenas a Rota Original (verde,
+    // chave 'b') -- o caso mais comum, já que ela normalmente já vem pronta
+    // ao soltar o KML -- a whitelist ficava vazia e NENHUM rótulo de via
+    // era desenhado na imagem, mesmo com rodovias federais/estaduais
+    // genuinamente no trajeto. Agora soma as rodovias das duas rotas que
+    // existirem.
+    const [descA, descB] = await Promise.all([
+      (ROUTES.a.waypoints && ROUTES.a.waypoints.length >= 2) ? _fetchRouteDescription(ROUTES.a.waypoints) : Promise.resolve(null),
+      (ROUTES.b.waypoints && ROUTES.b.waypoints.length >= 2) ? _fetchRouteDescription(ROUTES.b.waypoints) : Promise.resolve(null)
+    ]);
+    const allowedHighwayRefs = new Set([
+      ...((descA && descA.highways) || []),
+      ...((descB && descB.highways) || [])
+    ]);
+
+    // Base satellite (requested lossless so the only JPEG compression that
+    // ever happens is the final canvas.toBlob() below -- avoids the
+    // double-recompression quality loss of re-saving an already-JPEG base)
+    // and the OSM road/ref data are independent of each other, so fetch
+    // both at once instead of one after another.
+    const [baseImg, roadWaysRaw] = await Promise.all([
+      _fetchEsriMapImage(ESRI_WORLD_IMAGERY_EXPORT_URL, bbox, ROUTE_IMAGE_WIDTH, ROUTE_IMAGE_HEIGHT, { format: 'png24' }),
+      _fetchRoadRefWaysInBBox(bbox).catch(err => {
+        console.warn('Overpass road/ref lookup indisponível, seguindo só com satélite + rotas:', err);
+        return [];
+      })
+    ]);
+    // First keep only the roads actually part of the alternative route's
+    // trajeto, then (as a safety net) only the portions of those roads
+    // that genuinely run near one of the built routes -- see
+    // _filterRoadWaysNearRoute() for why that second step still matters
+    // (a road can share a ref with an unrelated stretch elsewhere in the
+    // frame).
+    const roadWaysAllowed = allowedHighwayRefs.size
+      ? roadWaysRaw.filter(w => allowedHighwayRefs.has(_extractHighwayCode(w.tags && w.tags.ref)))
+      : [];
+    const roadWays = _filterRoadWaysNearRoute(roadWaysAllowed, routePts);
+
+    const canvas = document.createElement('canvas');
+    canvas.width = ROUTE_IMAGE_WIDTH;
+    canvas.height = ROUTE_IMAGE_HEIGHT;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(baseImg, 0, 0, ROUTE_IMAGE_WIDTH, ROUTE_IMAGE_HEIGHT);
+
+    const project = (lat, lng) => {
+      const m = _lngLatToMercatorXY(lng, lat);
+      return [
+        (m.x - bbox.xmin) / (bbox.xmax - bbox.xmin) * ROUTE_IMAGE_WIDTH,
+        (bbox.ymax - m.y) / (bbox.ymax - bbox.ymin) * ROUTE_IMAGE_HEIGHT
+      ];
+    };
+
+    // Other roads' tracing (thin, pale) drawn before our own route lines,
+    // so our routes still stand out on top of the general road network.
+    _drawRoadRefLines(ctx, roadWays, project);
+
+    // Original (green) drawn first, alternative (red) on top -- matches
+    // the layering in the reference export.
+    ['b', 'a'].forEach(key => {
+      const r = ROUTES[key];
+      if (r.waypoints.length < 2) return;
+      const coords = (r.roadCoords && r.roadCoords.length >= 2) ? r.roadCoords : r.waypoints;
+      ctx.beginPath();
+      coords.forEach((c, i) => {
+        const [px, py] = project(c.lat, c.lng);
+        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      });
+      ctx.strokeStyle = r.color;
+      ctx.lineWidth = 4 * ROUTE_IMAGE_UI_SCALE;
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      ctx.shadowColor = 'rgba(0,0,0,0.6)';
+      ctx.shadowBlur = 3 * ROUTE_IMAGE_UI_SCALE;
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+    });
+
+    // Road shield labels (BR-xxx, RR-xxx...) drawn AFTER the route lines,
+    // fixed pixel size, so they stay legible even where a route runs right
+    // along that road -- matching the reference export's layering.
+    _drawRoadRefShieldLabels(ctx, roadWays, project);
+
+    LD_INICIO_POINTS.forEach(p => {
+      const [px, py] = project(p.lat, p.lng);
+      _drawPinMarker(ctx, px, py, LD_INICIO_COLOR);
+      // O deslocamento do rótulo era em pixels fixos, então em outros
+      // tamanhos de saída ele descolava do alfinete.
+      _drawRouteImageLabel(ctx, px + 14 * ROUTE_IMAGE_UI_SCALE, py - 11 * ROUTE_IMAGE_UI_SCALE, 'LD_INICIO_OAE');
+    });
+
+    const code = (ROUTES.a.nameMiddle || ROUTES.b.nameMiddle || '').trim();
+    _drawRouteImageTitle(ctx, code);
+    _drawRouteImageLegend(ctx, ready, LD_INICIO_POINTS.length > 0);
+    _drawRouteImageNorthArrow(ctx, ROUTE_IMAGE_WIDTH, ROUTE_IMAGE_HEIGHT);
+    _drawRouteImageScaleBar(ctx, bbox, ROUTE_IMAGE_WIDTH, ROUTE_IMAGE_HEIGHT);
+    _drawRouteImageAttribution(ctx, ROUTE_IMAGE_WIDTH, ROUTE_IMAGE_HEIGHT);
+
+    canvas.toBlob(blob => {
+      if (!blob) { showToast('⚠ Não foi possível gerar a imagem'); return; }
+      const safeCode = code.replace(/[\\/:*?"<>|]/g, '_');
+      const fileName = safeCode ? `ROTA_ALTERNATIVA_${safeCode}.jpg` : 'ROTA_ALTERNATIVA.jpg';
+      triggerDownload(blob, fileName);
+      const warning = !allowedHighwayRefs.size ? ' (nenhuma rodovia identificada no trajeto -- imagem sem rótulos de via)' : '';
+      showToast(`⬇ Imagem <span class="accent">${fileName}</span> gerada${warning}`);
+    }, 'image/jpeg', 0.95);
+  } catch (err) {
+    console.error('Falha ao gerar imagem da rota:', err);
+    showToast('⚠ Não foi possível gerar a imagem — falha ao obter a imagem de satélite (verifique a conexão)');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = originalLabel; }
+  }
+};
+
 // ─── LIVE RESULT ROWS (trajeto da alternativa / diferença em km) ──────────────
 // Two small display rows under the panels, kept up to date automatically as
 // either route is built/edited, each with its own compact copy button next
@@ -820,7 +1506,13 @@ function _flashCopyButton(btn, ok) {
 // Recomputes both result rows from scratch (one shared OSRM round-trip per
 // route). Debounced at the call site so dragging a stop doesn't fire this
 // on every frame.
+// Cada chamada recebe um número de sequência. Como as respostas do OSRM
+// podem voltar fora de ordem, uma consulta antiga que demorasse mais que a
+// seguinte sobrescrevia o resultado novo com um valor já obsoleto.
+let _routeResultsSeq = 0;
+
 async function _updateRouteResults() {
+  const seq = ++_routeResultsSeq;
   const a = ROUTES.a; // vermelha / ROTA_ALTERNATIVA
   const b = ROUTES.b; // verde    / ROTA_ORIGINAL
   const trajetoEl = document.getElementById('routeTrajetoValue');
@@ -843,6 +1535,8 @@ async function _updateRouteResults() {
     haveA ? _fetchRouteDescription(a.waypoints) : Promise.resolve(null),
     haveB ? _fetchRouteDescription(b.waypoints) : Promise.resolve(null)
   ]);
+
+  if (seq !== _routeResultsSeq) return; // resultado obsoleto, já há consulta mais nova
 
   trajetoEl.textContent = haveA
     ? ((descA && descA.highways.length) ? descA.highways.join('; ') : '—')

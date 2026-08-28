@@ -389,6 +389,14 @@
     letter-spacing: 0.5px;
   }
 
+  .medidas-global-row {
+    border: 1px solid var(--border);
+    border-left: 3px solid #d4f53c;
+    border-radius: 6px;
+    background: rgba(255,255,255,0.02);
+    padding: 8px 12px;
+  }
+
   .medidas-list { display: flex; flex-direction: column; gap: 10px; }
 
   .medidas-card {
@@ -422,6 +430,39 @@
      colored #d4f53c. */
   .medidas-row b { color: var(--text); font-family: var(--mono); font-weight: 400; font-size: 11px; }
   .medidas-row small { font-size: 11px; font-weight: 400; color: var(--text); opacity: 0.85; margin-left: 4px; }
+
+  .medidas-row-value { display: flex; align-items: center; gap: 6px; }
+
+  .medidas-row-copy {
+    flex-shrink: 0;
+    background: rgba(232,255,77,0.1);
+    color: var(--accent);
+    border: 1px solid rgba(232,255,77,0.3);
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    line-height: 1;
+    padding: 4px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+  .medidas-row-copy:hover { background: rgba(232,255,77,0.18); border-color: var(--accent); }
+  .medidas-row-copy.copied { background: #4caf50; border-color: #4caf50; color: #0a1f0a; }
+  .medidas-row-copy.copy-failed { background: #f44336; border-color: #f44336; color: #fff; }
+
+  .medidas-subhead {
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    color: var(--muted);
+    margin: 10px 0 4px;
+    padding-top: 8px;
+    border-top: 1px dashed var(--border);
+  }
 
   .medidas-badge {
     font-family: var(--mono);
@@ -817,6 +858,7 @@
   .nomes-diagram-badge { cursor: pointer; }
   .nomes-diagram-badge-circle { fill: var(--panel); stroke: var(--accent); stroke-width: 2; transition: fill 0.15s, stroke 0.15s; }
   .nomes-diagram-badge-text { fill: #ffffff; font-family: var(--mono); font-size: 13px; font-weight: 700; text-anchor: middle; pointer-events: none; }
+  .nomes-diagram-badge-text-multi { font-size: 8px; }
   .nomes-diagram-badge:hover .nomes-diagram-badge-circle { fill: var(--accent-glow); }
   .nomes-diagram-badge.nomes-copied .nomes-diagram-badge-circle { fill: #4caf50; stroke: #4caf50; }
   .nomes-diagram-badge.nomes-copy-failed .nomes-diagram-badge-circle { fill: #b3261e; stroke: #f44336; }
@@ -1521,6 +1563,14 @@
   }
 
   .photo-item:hover { background: rgba(255,255,255,0.025); }
+
+  .photo-select-checkbox {
+    flex-shrink: 0;
+    width: 16px;
+    height: 16px;
+    accent-color: var(--accent);
+    cursor: pointer;
+  }
   .photo-item.active {
     background: linear-gradient(90deg, rgba(212,245,60,0.07) 0%, rgba(212,245,60,0.02) 100%);
   }
@@ -3139,3 +3189,32 @@
       scroll-behavior: auto !important;
     }
   }
+
+/* ==========================================================================
+   Ajustes desta revisão
+   ========================================================================== */
+
+/* Destaque ao clicar em uma data na linha do tempo.
+   Antes esse efeito era aplicado por style inline no JavaScript, o que
+   sobrescrevia o fundo do item selecionado e do :hover enquanto durava. */
+.photo-item.date-flash {
+  background: rgba(212, 245, 60, 0.10);
+  transition: background 0.2s ease;
+}
+
+/* Total acumulado da ferramenta de medição */
+.measure-tooltip.measure-total {
+  font-weight: 600;
+  background: rgba(212, 245, 60, 0.92);
+  color: #0a0a0a;
+  border: none;
+}
+
+/* Nenhuma foto tem miniatura antes de ser decodificada; sem isso o alt
+   text/ícone de imagem quebrada piscava na lista. */
+.photo-thumb { background: rgba(255, 255, 255, 0.04); object-fit: cover; }
+
+/* Respeita quem prefere menos animação (WCAG 2.3.3) */
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}

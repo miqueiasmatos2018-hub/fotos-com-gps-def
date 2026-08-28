@@ -45,11 +45,15 @@ function _clientToContainerPoint(e) {
   return L.point(t.clientX - rect.left, t.clientY - rect.top);
 }
 
+// Só considera marcadores realmente desenhados na tela (`_icon` existe).
+// Antes, um marcador escondido dentro de um cluster fechado ainda era
+// "clicável" pela posição onde ele estaria -- abrindo o popup de uma foto
+// invisível. Também evita varrer marcadores que não estão no mapa.
 function _findNearestMarkerId(containerPoint, thresholdPx) {
   let bestId = null, bestDist = Infinity;
   for (const id in markers) {
     const m = markers[id];
-    if (!m || !m.getLatLng) continue;
+    if (!m || !m._icon || !m.getLatLng) continue;
     const pt = map.latLngToContainerPoint(m.getLatLng());
     const dx = pt.x - containerPoint.x, dy = pt.y - containerPoint.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
@@ -61,26 +65,46 @@ function _findNearestMarkerId(containerPoint, thresholdPx) {
 let _lastMarkerTapId = null;
 let _lastMarkerTapTime = 0;
 
+// Modos que precisam do clique do mapa cru (medir, criar ponto, adicionar
+// parada de rota, reposicionar foto). Se algum estiver ativo, este handler
+// não pode sequestrar o gesto -- senão era impossível marcar um ponto em
+// cima de uma foto.
+function _anyMapPickingModeActive() {
+  if (typeof _pickingForId !== 'undefined' && _pickingForId) return true;
+  if (typeof _pontoPickingHandler !== 'undefined' && _pontoPickingHandler) return true;
+  if (typeof _routePickingKey !== 'undefined' && _routePickingKey) return true;
+  if (typeof window._measureActive !== 'undefined' && window._measureActive) return true;
+  return false;
+}
+
 function _onMapPointerDownCapture(e) {
-  // Ignore right-click / non-primary buttons
+  // Só é necessário com o mapa rotacionado. Com bearing 0 o Leaflet acerta
+  // o alvo do clique sozinho, e interceptar aqui só criava efeitos
+  // colaterais (foco em inputs de popup, cliques em controles, etc).
+  if (!_rotatedMode) return;
+
+  // Ignora botão direito / não-primário
   if (e.type === 'mousedown' && e.button !== 0) return;
-  // Don't hijack taps while placing a new point (relocate / ponto picking)
-  if (typeof _pickingForId !== 'undefined' && _pickingForId) return;
-  if (typeof _pontoPickingHandler !== 'undefined' && _pontoPickingHandler) return;
+  if (_anyMapPickingModeActive()) return;
 
   const containerEl = map.getContainer();
   if (!e.target || !containerEl.contains(e.target)) return;
 
+  // Popups, controles e a barra de busca ficam dentro do container do mapa;
+  // um clique neles é um clique de UI, não no mapa.
+  if (e.target.closest &&
+      e.target.closest('.leaflet-popup, .leaflet-control, .map-search-bar, input, textarea, select, button')) return;
+
   const pt = _clientToContainerPoint(e);
   const id = _findNearestMarkerId(pt, 26);
-  if (!id) return; // not close enough to any marker — let the map behave normally
+  if (!id) return; // longe de qualquer marcador -- deixa o mapa agir normalmente
 
-  // Stop here so leaflet-rotate's drag handling never sees this gesture.
+  // Para aqui para que o arrasto do leaflet-rotate nunca veja este gesto.
   e.stopPropagation();
   if (e.cancelable) e.preventDefault();
 
-  // mousedown and touchstart can both fire for the same physical tap on
-  // touch devices — only act once per gesture.
+  // mousedown e touchstart disparam para o mesmo toque em telas sensíveis --
+  // age uma vez só por gesto.
   const now = Date.now();
   if (_lastMarkerTapId === id && (now - _lastMarkerTapTime) < 400) return;
   _lastMarkerTapId = id;

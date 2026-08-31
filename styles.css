@@ -2165,7 +2165,7 @@
   .rotate-btn.reset { color: #fff; font-size: 12px; }
 
   /* NO GPS ALERT */
-  /* PHOTO ISSUES ALERT POPUP (No GPS / Low MP / Over 30MB) */
+  /* PHOTO ISSUES ALERT POPUP (No GPS / Low MP / 29MB or more) */
   .issues-alert-overlay {
     position: fixed;
     inset: 0;

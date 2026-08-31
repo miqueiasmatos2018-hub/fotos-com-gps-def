@@ -1579,11 +1579,12 @@ window.copyRouteDiffKm = function() {
     showToast('Diferença ainda não disponível — crie as duas rotas primeiro');
     return;
   }
-  // The "+" shown on screen is just a visual cue that the alternative is
-  // longer; it's noise once pasted elsewhere, so strip it from what's
-  // actually copied (a "-" for a shorter alternative is kept, since that
-  // sign is meaningful).
-  const copyValue = text.replace(/^\+/, '');
+  // O "+" na tela é só uma pista visual de que a alternativa é mais longa
+  // -- vira ruído depois de colado em outro lugar, então é removido daqui
+  // (um "-" para uma alternativa mais curta é mantido, já que esse sinal
+  // tem significado). O sufixo " KM" também é só rótulo de tela; copiar só
+  // o número é o que faz sentido para colar numa planilha, por exemplo.
+  const copyValue = text.replace(/^\+/, '').replace(/\s*km\s*$/i, '').trim();
   _copyText(copyValue)
     .then(() => _flashCopyButton(btn, true))
     .catch(err => { console.error('Copy diff failed:', err); _flashCopyButton(btn, false); });

@@ -230,16 +230,35 @@ window.exportAllSmart = async function() {
           sub.textContent = `Salvando ${i + 1} / ${photos.length} — ${photo.name}`;
           fill.style.width = ((i + 1) / photos.length * 100) + '%';
 
+          const filename = makeUniqueName(ensureJpgExtension(photo.name), used);
+
+          // Mesma rede de segurança do caminho ZIP (_exportPhotosAsZip): se a
+          // gravação do EXIF falhar, salva o arquivo original em vez de
+          // simplesmente pular a foto -- antes, essa falha (rara, mas
+          // possível com um JPEG corrompido) fazia a foto sumir da pasta
+          // exportada sem nenhum arquivo no lugar dela.
+          let blob;
           try {
-            const blob = await buildJpegWithExif(photo);
-            const filename = makeUniqueName(ensureJpgExtension(photo.name), used);
+            blob = await buildJpegWithExif(photo);
+          } catch (buildErr) {
+            console.warn('buildJpegWithExif falhou em', photo.name, buildErr);
+            try {
+              blob = photo.file instanceof File ? photo.file : await fetch(photo.url).then(r => r.blob());
+            } catch (e2) {
+              errors++;
+              console.error('Não foi possível salvar', photo.name, e2);
+              continue;
+            }
+          }
+
+          try {
             const fileHandle = await folder.getFileHandle(filename, { create: true });
             const writable   = await fileHandle.createWritable();
             await writable.write(blob);
             await writable.close();
-          } catch (perPhoto) {
+          } catch (writeErr) {
             errors++;
-            console.error('Não foi possível salvar', photo.name, perPhoto);
+            console.error('Não foi possível salvar', photo.name, writeErr);
           }
         }
 

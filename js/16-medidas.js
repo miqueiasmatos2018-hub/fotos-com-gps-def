@@ -231,7 +231,7 @@ function registerMedidasKmlDrop(parsedLayer) {
   const touchedGroups = new Set();
   found.forEach(p => {
     const key = p.groupKey || '__default__';
-    if (!MEDIDAS_STRUCTURES[key]) MEDIDAS_STRUCTURES[key] = { groupKey: p.groupKey, points: {}, analysis: null, barrierType: null, dnitKm: null, dnitBr: null, dnitUf: null, melhorEpoca: null, cidadeAntes: null, cidadeDepois: null, lookupsStarted: false };
+    if (!MEDIDAS_STRUCTURES[key]) MEDIDAS_STRUCTURES[key] = { groupKey: p.groupKey, points: {}, analysis: null, barrierType: null, dnitKm: null, dnitBr: null, dnitUf: null, dnitSnvCodigo: null, dnitSnvVersao: null, melhorEpoca: null, cidadeAntes: null, cidadeDepois: null, lookupsStarted: false };
     const struct = MEDIDAS_STRUCTURES[key];
     const prev = struct.points[p.canonical];
 
@@ -242,6 +242,7 @@ function registerMedidasKmlDrop(parsedLayer) {
         (Math.abs(prev.lat - p.lat) > 1e-9 || Math.abs(prev.lng - p.lng) > 1e-9)) {
       struct.lookupsStarted = false;
       struct.dnitKm = struct.dnitBr = struct.dnitUf = null;
+      struct.dnitSnvCodigo = struct.dnitSnvVersao = null;
       struct.melhorEpoca = struct.cidadeAntes = struct.cidadeDepois = null;
     }
 
@@ -273,15 +274,51 @@ function registerMedidasKmlDrop(parsedLayer) {
   }
 }
 
-// DNIT's localizarkm endpoint also returns "br" and "uf" alongside "km"
-// (see extractDnitKm's comment in 08-kml.js for the full response shape) --
-// pulled out the same tolerant way in case casing varies between records.
+// DNIT's localizarkm endpoint also returns "br", "uf" and "versao" (Versão
+// SNV) alongside "km" (see extractDnitKm's comment in 08-kml.js for the
+// full response shape) -- pulled out the same tolerant way in case casing
+// varies between records. Its "id_trecho" field (which looked like it
+// might be the Código SNV) comes back as an empty string in practice, so
+// it's normalized to null here and the real Código SNV is fetched
+// separately from a different source (see _fetchCodigoSnv below).
 function _extractDnitBrUf(data) {
   const rec = Array.isArray(data) ? data[0] : data;
-  if (!rec || typeof rec !== 'object') return { br: null, uf: null };
+  if (!rec || typeof rec !== 'object') return { br: null, uf: null, codigoSnv: null, versaoSnv: null };
   const br = rec.br ?? rec.BR ?? rec.Br ?? null;
   const uf = rec.uf ?? rec.UF ?? rec.Uf ?? null;
-  return { br, uf };
+  const rawCodigo = rec.id_trecho ?? rec.Id_Trecho ?? rec.ID_TRECHO ?? rec.codigo_snv ?? rec.Codigo_SNV ?? null;
+  const codigoSnv = rawCodigo != null && String(rawCodigo).trim() !== '' ? rawCodigo : null;
+  const versaoSnv = rec.versao ?? rec.Versao ?? rec.VERSAO ?? rec.versao_snv ?? rec.Versao_SNV ?? null;
+  return { br, uf, codigoSnv, versaoSnv };
+}
+
+// O localizarkm da DNIT não traz o Código SNV de verdade (campo id_trecho
+// vazio -- confirmado no console em 2026-08). Esta camada pública, um
+// espelho da malha rodoviária oficial da DNIT mantido pelo IBAMA/PAMGIA,
+// tem o campo "codigo_snv" de verdade. É um servidor ArcGIS completamente
+// separado do resto do app -- se sair do ar ou bloquear CORS para o
+// domínio do site, isso é pego pelo try/catch do chamador e não derruba
+// BR/UF/km, que já vieram do localizarkm.
+const DNIT_SNV_LAYER_URL = 'https://pamgia.ibama.gov.br/server/rest/services/01_Publicacoes_Bases/tra_trecho_rodoviario_principal_l/FeatureServer/23/query';
+
+async function _fetchCodigoSnv(lat, lng) {
+  const params = new URLSearchParams({
+    geometry: `${lng},${lat}`,
+    geometryType: 'esriGeometryPoint',
+    inSR: '4326',
+    spatialRel: 'esriSpatialRelIntersects',
+    distance: '500', // metros -- a geometria da via raramente passa exatamente no ponto do GPS
+    units: 'esriSRUnit_Meter',
+    outFields: 'codigo_snv',
+    returnGeometry: 'false',
+    f: 'json'
+  });
+  const res = await fetch(`${DNIT_SNV_LAYER_URL}?${params.toString()}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = await res.json();
+  const feat = data && Array.isArray(data.features) ? data.features[0] : null;
+  const codigo = feat && feat.attributes ? feat.attributes.codigo_snv : null;
+  return codigo != null && String(codigo).trim() !== '' ? String(codigo).trim() : null;
 }
 
 // Same two lookups shown in the LD_INICIO_OAE marker popup for a dropped
@@ -315,14 +352,27 @@ async function _startMedidasLdInicioLookups(s) {
       try { data = await res.json(); } catch (_) { data = await res.text().catch(() => null); }
       const km = extractDnitKm(data);
       s.dnitKm = km != null ? km : (data ? JSON.stringify(data).slice(0, 80) : '—');
-      const { br, uf } = _extractDnitBrUf(data);
+      const { br, uf, codigoSnv, versaoSnv } = _extractDnitBrUf(data);
       s.dnitBr = br != null ? String(br) : '—';
       s.dnitUf = uf != null ? String(uf) : '—';
+      s.dnitSnvVersao = versaoSnv != null ? String(versaoSnv) : '—';
+
+      // Consulta separada -- ver comentário de _fetchCodigoSnv. Erro aqui
+      // (fora do ar, CORS) não deve apagar BR/UF/km que já vieram acima.
+      try {
+        const codigoFromLayer = await _fetchCodigoSnv(ld.lat, ld.lng);
+        s.dnitSnvCodigo = codigoFromLayer != null ? codigoFromLayer : (codigoSnv != null ? String(codigoSnv) : '—');
+      } catch (snvErr) {
+        console.warn('Código SNV (camada IBAMA/PAMGIA) lookup failed:', snvErr);
+        s.dnitSnvCodigo = codigoSnv != null ? String(codigoSnv) : '—';
+      }
     } catch (err) {
       console.error('DNIT localizarkm lookup (medidas) failed:', err);
       s.dnitKm = 'erro na consulta';
       s.dnitBr = 'erro na consulta';
       s.dnitUf = 'erro na consulta';
+      s.dnitSnvCodigo = 'erro na consulta';
+      s.dnitSnvVersao = 'erro na consulta';
     }
     _renderMedidasList();
     // Only makes sense once we know which BR the structure is on.
@@ -357,8 +407,10 @@ async function _startMedidasLdInicioLookups(s) {
 // CIDADE_MATCH_RADIUS_M of that geometry -- if that check finds nothing
 // (e.g. the BR fetch came back empty), it falls back to the plain
 // nearest-in-that-direction settlement rather than showing nothing at all.
-const CIDADE_SEARCH_RADIUS_M = 80000; // generous -- rural BR stretches can be sparse
-const CIDADE_MATCH_RADIUS_M  = 8000;  // how close to the BR geometry a place still counts as "on it"
+const CIDADE_SEARCH_RADIUS_M      = 80000;  // generous -- rural BR stretches can be sparse
+const CIDADE_WIDE_SEARCH_RADIUS_M = 250000; // 2ª tentativa, ao longo da mesma BR, quando nada no raio normal atinge CIDADE_MIN_POPULATION
+const CIDADE_MATCH_RADIUS_M       = 8000;   // how close to the BR geometry a place still counts as "on it"
+const CIDADE_MIN_POPULATION       = 10000;  // Antes/Depois só considera cidades com essa população (tag OSM "population") ou mais
 
 async function _overpassQuery(query) {
   let lastErr = null;
@@ -379,15 +431,15 @@ async function _overpassQuery(query) {
   throw lastErr || new Error('Todos os espelhos do Overpass falharam');
 }
 
-function _fetchCidadesNear(lat, lng) {
+function _fetchCidadesNear(lat, lng, radiusM) {
   return _overpassQuery(
-    `[out:json][timeout:25];node(around:${CIDADE_SEARCH_RADIUS_M},${lat},${lng})["place"~"^(city|town|village)$"];out body;`
+    `[out:json][timeout:25];node(around:${radiusM},${lat},${lng})["place"~"^(city|town|village)$"];out body;`
   );
 }
 
-function _fetchBRWaysNear(lat, lng, digits) {
+function _fetchBRWaysNear(lat, lng, digits, radiusM) {
   return _overpassQuery(
-    `[out:json][timeout:25];way(around:${CIDADE_SEARCH_RADIUS_M},${lat},${lng})["highway"]["ref"~"BR[-\\s]?0*${digits}\\b",i];out geom;`
+    `[out:json][timeout:25];way(around:${radiusM},${lat},${lng})["highway"]["ref"~"BR[-\\s]?0*${digits}\\b",i];out geom;`
   );
 }
 
@@ -413,16 +465,36 @@ function _angleDiff(a, b) {
 // bigger city (Boa Vista, in these cases) rather than their own town.
 const CIDADE_NAME_EXCLUDE_RE = /^p\.?\s*a\.?\s/i; // "P.A. " / "PA " prefix
 
+// Extrai a população de um node do OSM (tag "population"), tolerando
+// separadores de milhar ("12.345", "12,345"). Retorna null quando a tag
+// não existe ou não é um número -- esses lugares nunca contam como
+// "cidade grande" (ver _pickCidadesAntesDepois), mesmo se forem a
+// candidata mais próxima.
+function _cityPopulation(c) {
+  const raw = c.tags && c.tags.population;
+  if (raw == null) return null;
+  const digits = String(raw).replace(/\D/g, '');
+  if (!digits) return null;
+  const n = parseInt(digits, 10);
+  return Number.isFinite(n) ? n : null;
+}
+
 // Splits candidate places into "ahead" (Depois) vs "behind" (Antes)
 // relative to the highway's own direction of travel at the structure
-// (roadCompassBearing), then keeps the nearest of each.
-function _pickCidadesAntesDepois(cities, structLat, structLng, roadCompassBearing) {
+// (roadCompassBearing), then keeps the nearest of each. Quando
+// minPopulation é informado, ignora qualquer candidata sem população
+// conhecida no OSM ou abaixo do mínimo.
+function _pickCidadesAntesDepois(cities, structLat, structLng, roadCompassBearing, minPopulation) {
   let antes = null, antesDist = Infinity;
   let depois = null, depoisDist = Infinity;
 
   cities.forEach(c => {
     if (!c.tags || !c.tags.name || c.lat == null || c.lon == null) return;
     if (CIDADE_NAME_EXCLUDE_RE.test(c.tags.name)) return;
+    if (minPopulation != null) {
+      const pop = _cityPopulation(c);
+      if (pop == null || pop < minPopulation) return;
+    }
     const bearingToCity = _bearingBetween(structLat, structLng, c.lat, c.lon);
     const dist = _haversineKm(structLat, structLng, c.lat, c.lon);
     if (_angleDiff(bearingToCity, roadCompassBearing) <= 90) {
@@ -450,31 +522,48 @@ async function _startMedidasCidadesLookup(s) {
 
   try {
     const digits = String(s.dnitBr || '').replace(/\D/g, '');
-    const [cities, brWays] = await Promise.all([
-      _fetchCidadesNear(ld.lat, ld.lng),
-      digits ? _fetchBRWaysNear(ld.lat, ld.lng, digits).catch(err => {
-        console.warn('BR-geometry lookup for Cidade Antes/Depois failed, falling back to unfiltered:', err);
-        return [];
-      }) : Promise.resolve([])
-    ]);
-
-    // Keep only settlements that actually sit near the BR's own geometry
-    // -- but if that check yields nothing (BR fetch failed/empty, or ref
-    // format didn't match), fall back to the unfiltered list rather than
-    // reporting "não encontrada" outright.
-    const matchKm = CIDADE_MATCH_RADIUS_M / 1000;
-    const onBR = brWays.length
-      ? cities.filter(c => c.lat != null && c.lon != null && brWays.some(w =>
-          (w.geometry || []).some(pt => _haversineKm(c.lat, c.lon, pt.lat, pt.lon) <= matchKm)
-        ))
-      : [];
-    const candidates = onBR.length ? onBR : cities;
-
     // Same UTM-plane-angle -> compass-bearing conversion used elsewhere in
     // this file: anguloEixo is the bridge's own longitudinal axis, which
     // is also the highway's direction of travel at that exact point.
     const roadBearing = (90 - a.anguloEixo + 360) % 360;
-    const { antes, depois } = _pickCidadesAntesDepois(candidates, ld.lat, ld.lng, roadBearing);
+
+    // Busca cidades num raio, filtra pelas que ficam sobre a geometria da
+    // própria BR (quando disponível) e cai para a lista sem filtro se essa
+    // checagem não achar nada.
+    async function candidatesAt(radiusM) {
+      const [cities, brWays] = await Promise.all([
+        _fetchCidadesNear(ld.lat, ld.lng, radiusM),
+        digits ? _fetchBRWaysNear(ld.lat, ld.lng, digits, radiusM).catch(err => {
+          console.warn('BR-geometry lookup for Cidade Antes/Depois failed, falling back to unfiltered:', err);
+          return [];
+        }) : Promise.resolve([])
+      ]);
+      const matchKm = CIDADE_MATCH_RADIUS_M / 1000;
+      const onBR = brWays.length
+        ? cities.filter(c => c.lat != null && c.lon != null && brWays.some(w =>
+            (w.geometry || []).some(pt => _haversineKm(c.lat, c.lon, pt.lat, pt.lon) <= matchKm)
+          ))
+        : [];
+      return onBR.length ? onBR : cities;
+    }
+
+    let { antes, depois } = _pickCidadesAntesDepois(
+      await candidatesAt(CIDADE_SEARCH_RADIUS_M), ld.lat, ld.lng, roadBearing, CIDADE_MIN_POPULATION
+    );
+
+    // Nenhuma cidade com população >= CIDADE_MIN_POPULATION no raio normal,
+    // numa das duas direções -- amplia a busca ao longo da mesma BR antes
+    // de desistir, já que o objetivo é sempre indicar uma cidade de
+    // referência de porte relevante, não a povoação mais próxima de
+    // qualquer tamanho.
+    if (antes == null || depois == null) {
+      const wide = _pickCidadesAntesDepois(
+        await candidatesAt(CIDADE_WIDE_SEARCH_RADIUS_M), ld.lat, ld.lng, roadBearing, CIDADE_MIN_POPULATION
+      );
+      if (antes == null) antes = wide.antes;
+      if (depois == null) depois = wide.depois;
+    }
+
     s.cidadeAntes = antes || 'não encontrada';
     s.cidadeDepois = depois || 'não encontrada';
   } catch (err) {
@@ -585,6 +674,8 @@ function _renderMedidasList() {
         ${_medidasCopyRow('BR', s.dnitBr != null ? s.dnitBr : 'consultando…', s.dnitBr == null)}
         ${_medidasCopyRow('UF', s.dnitUf != null ? s.dnitUf : 'consultando…', s.dnitUf == null)}
         ${_medidasCopyRow('Local na Via (km)', s.dnitKm != null ? s.dnitKm : 'consultando…', s.dnitKm == null)}
+        ${_medidasCopyRow('Código SNV', s.dnitSnvCodigo != null ? s.dnitSnvCodigo : 'consultando…', s.dnitSnvCodigo == null)}
+        ${_medidasCopyRow('Versão SNV', s.dnitSnvVersao != null ? s.dnitSnvVersao : 'consultando…', s.dnitSnvVersao == null)}
         <div class="medidas-row"><span>Melhor Época</span><b>${escapeHtml(s.melhorEpoca != null ? s.melhorEpoca : 'calculando…')}</b></div>
         ${_medidasCopyRow('Cidade Antes', s.cidadeAntes != null ? s.cidadeAntes : 'consultando…', s.cidadeAntes == null)}
         ${_medidasCopyRow('Cidade Depois', s.cidadeDepois != null ? s.cidadeDepois : 'consultando…', s.cidadeDepois == null)}

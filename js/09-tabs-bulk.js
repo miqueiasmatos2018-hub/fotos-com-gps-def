@@ -83,8 +83,11 @@ window.applyBulkEdit = function() {
     pushUndo(photo);
 
     toApply.forEach(f => {
-      if (f.metaKey === 'lat') { photo.lat = parseFloat(f.val); photo.exif.latitude = photo.lat; }
-      else if (f.metaKey === 'lng') { photo.lng = parseFloat(f.val); photo.exif.longitude = photo.lng; }
+      // Mesma guarda contra NaN usada em savePopupEdits/commitMetaEdit: sem
+      // ela, um valor inválido no campo de lat/lng em massa gravava NaN nas
+      // coordenadas de todas as fotos e quebrava os marcadores no mapa.
+      if (f.metaKey === 'lat') { const v = parseFloat(f.val); if (!isNaN(v)) { photo.lat = v; photo.exif.latitude = v; } }
+      else if (f.metaKey === 'lng') { const v = parseFloat(f.val); if (!isNaN(v)) { photo.lng = v; photo.exif.longitude = v; } }
       else { photo.exif[f.metaKey] = f.num ? parseFloat(f.val) : f.val; }
     });
 

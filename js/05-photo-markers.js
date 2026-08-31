@@ -16,25 +16,34 @@ function buildPhotoPopupHtml(photo) {
   const exif = photo.exif || {};
   const id = photo.id;
   const hasGps = photo.lat != null && photo.lng != null;
+  const latVal  = photo.lat != null ? photo.lat.toFixed(8) : '';
+  const lngVal  = photo.lng != null ? photo.lng.toFixed(8) : '';
+  const dateVal = exif.DateTimeOriginal ? formatDate(exif.DateTimeOriginal) : '';
+  // data-original guarda o valor exibido em cada campo -- savePopupEdits usa
+  // isso para só regravar o que a pessoa realmente editou (ver comentário lá).
   return `
     <div class="popup-content" style="min-width:220px">
       <img class="popup-img" src="${photo.url}" alt="" loading="lazy">
       <input class="popup-edit-name" data-field="name" data-id="${id}"
+        data-original="${escapeHtml(photo.name)}"
         value="${escapeHtml(photo.name)}" maxlength="120" spellcheck="false">
       <div class="popup-edit-row">
         <span class="popup-edit-label">GPS Lat</span>
         <input class="popup-edit-input" data-field="lat" data-id="${id}"
-          value="${photo.lat != null ? photo.lat.toFixed(8) : ''}" placeholder="—" type="number" step="any">
+          data-original="${latVal}"
+          value="${latVal}" placeholder="—" type="number" step="any">
       </div>
       <div class="popup-edit-row">
         <span class="popup-edit-label">GPS Lng</span>
         <input class="popup-edit-input" data-field="lng" data-id="${id}"
-          value="${photo.lng != null ? photo.lng.toFixed(8) : ''}" placeholder="—" type="number" step="any">
+          data-original="${lngVal}"
+          value="${lngVal}" placeholder="—" type="number" step="any">
       </div>
       <div class="popup-edit-row">
         <span class="popup-edit-label">Data</span>
         <input class="popup-edit-input" data-field="DateTimeOriginal" data-id="${id}"
-          value="${exif.DateTimeOriginal ? formatDate(exif.DateTimeOriginal) : ''}" placeholder="—">
+          data-original="${escapeHtml(dateVal)}"
+          value="${escapeHtml(dateVal)}" placeholder="—">
       </div>
       <div class="popup-btn-row">
         <button class="popup-save-btn" onclick="savePopupEdits('${id}')">SALVAR</button>
@@ -61,6 +70,13 @@ window.savePopupEdits = function(id) {
   el.querySelectorAll('[data-field]').forEach(input => {
     const field = input.dataset.field;
     const val = input.value.trim();
+    // Reabrir o popup (ex: depois de reposicionar pelo 🗺) e clicar SALVAR
+    // sem tocar em tudo regravava TODOS os campos exibidos -- inclusive a
+    // Data, convertendo-a do objeto original para o texto já formatado
+    // (dd/mm/aaaa) que aparecia no campo. Isso corrompia a Data gravada no
+    // EXIF exportado (alguns visualizadores caíam de volta para a data de
+    // modificação do arquivo). Agora um campo que não foi tocado é ignorado.
+    if (val === (input.dataset.original || '')) return;
     if (field === 'name') {
       if (val) {
         photo.name = val;

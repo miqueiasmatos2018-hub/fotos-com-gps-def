@@ -565,7 +565,7 @@
 
 <div class="toast" id="toast"></div>
 
-<!-- PHOTO ISSUES ALERT (No GPS / Low MP / Over 30MB) -->
+<!-- PHOTO ISSUES ALERT (No GPS / Low MP / 29MB or more) -->
 <div class="issues-alert-overlay" id="issuesAlertOverlay" onclick="closeIssuesAlert(event)">
   <div class="issues-alert-box">
     <span class="issues-alert-icon">⚠️</span>
@@ -574,7 +574,7 @@
 
     <div class="issues-alert-actions" id="issuesAlertActions">
       <button class="issues-alert-action-btn" id="mpUpscaleBtn" onclick="upscaleLowMpPhotos()">⬆ REDIMENSIONAR PARA 12MP</button>
-      <button class="issues-alert-action-btn" id="sizeCompressBtn" onclick="compressOverSizePhotos()">🗜 COMPACTAR PARA &lt;30MB</button>
+      <button class="issues-alert-action-btn" id="sizeCompressBtn" onclick="compressOverSizePhotos()">🗜 COMPACTAR PARA &lt;29MB</button>
     </div>
 
     <div class="issues-upscale-progress" id="mpUpscaleProgress" style="display:none">

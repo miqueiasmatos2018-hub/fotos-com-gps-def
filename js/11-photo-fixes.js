@@ -1,6 +1,6 @@
 // ==========================================================================
 // 11-photo-fixes.js
-// Low-MP upscale, >30MB compression, duplicate-GPS spread, issues alert.
+// Low-MP upscale, >=29MB compression, duplicate-GPS spread, issues alert.
 //
 // Loaded as a classic script (not a module) so all files share one global
 // scope, exactly like the original single-file build. Load order matters --
@@ -9,7 +9,7 @@
 
 // Limites do padrão de inspeção. Declarados no topo do arquivo porque
 // funções deste e de outros módulos (04-photos.js) os usam.
-const MAX_PHOTO_BYTES = 30 * 1024 * 1024; // 30MB
+const MAX_PHOTO_BYTES = 29 * 1024 * 1024; // 29MB
 const MIN_PHOTO_MP    = 12;
 
 window.upscaleLowMpPhotos = async function() {
@@ -80,6 +80,22 @@ window.upscaleLowMpPhotos = async function() {
           photo.imgWidth    = targetW;
           photo.imgHeight   = targetH;
 
+          // buildThumbForPhoto (chamado logo abaixo) prioriza as dimensões
+          // gravadas no EXIF quando existem -- sem isso, ele lia as
+          // dimensões ANTIGAS ainda no EXIF em memória e sobrescrevia
+          // megapixels/imgWidth/imgHeight de volta para o valor baixo, e o
+          // círculo do lado da foto nunca ficava verde depois do
+          // redimensionamento. Limpa os campos de dimensão do EXIF para
+          // forçar a remedição a partir do arquivo já redimensionado.
+          if (photo.exif) {
+            delete photo.exif.ExifImageWidth;
+            delete photo.exif.ExifImageHeight;
+            delete photo.exif.PixelXDimension;
+            delete photo.exif.PixelYDimension;
+            delete photo.exif.ImageWidth;
+            delete photo.exif.ImageHeight;
+          }
+
           // Regera a miniatura a partir da imagem nova: antes o painel e o
           // marcador continuavam mostrando a miniatura da versão antiga.
           buildThumbForPhoto(photo).finally(() => {
@@ -107,13 +123,13 @@ window.upscaleLowMpPhotos = async function() {
   }, 900);
 };
 
-// Shrink photos over MAX_PHOTO_BYTES (30MB) down under that limit without
+// Shrink photos with MAX_PHOTO_BYTES (29MB) or more down under that limit without
 // visibly distorting them (aspect ratio is always preserved) and without
 // ever dropping below MIN_PHOTO_MP (12MP). Tries reducing JPEG quality
 // first — usually enough on its own — and only reduces dimensions if
 // quality reduction alone isn't sufficient, stopping at the 12MP floor.
 window.compressOverSizePhotos = async function() {
-  const overPhotos = photos.filter(p => p.file && p.file.size > MAX_PHOTO_BYTES);
+  const overPhotos = photos.filter(p => p.file && p.file.size >= MAX_PHOTO_BYTES);
   if (!overPhotos.length) return;
 
   const btn      = document.getElementById('sizeCompressBtn');
@@ -193,6 +209,18 @@ window.compressOverSizePhotos = async function() {
         photo.megapixels = (bestW * bestH) / 1_000_000;
         photo.imgWidth   = bestW;
         photo.imgHeight  = bestH;
+
+        // Mesmo motivo do upscaleLowMpPhotos: limpa as dimensões antigas do
+        // EXIF para que buildThumbForPhoto remeça a partir do arquivo já
+        // compactado, em vez de reaplicar as dimensões antigas por cima.
+        if (photo.exif) {
+          delete photo.exif.ExifImageWidth;
+          delete photo.exif.ExifImageHeight;
+          delete photo.exif.PixelXDimension;
+          delete photo.exif.PixelYDimension;
+          delete photo.exif.ImageWidth;
+          delete photo.exif.ImageHeight;
+        }
 
         buildThumbForPhoto(photo).finally(() => {
           const m = markers[photo.id];
@@ -290,11 +318,11 @@ window.randomizeDupGps = function() {
   if (active) showDetail(active);
 };
 
-// ─── ALERTA DE PROBLEMAS (sem GPS / abaixo de 12MP / acima de 30MB) ──────────
+// ─── ALERTA DE PROBLEMAS (sem GPS / abaixo de 12MP / 29MB ou mais) ──────────
 function checkPhotoIssues() {
   const noGps    = photos.filter(p => p.lat == null);
   const lowMp    = photos.filter(p => p.megapixels != null && p.megapixels < MIN_PHOTO_MP);
-  const overSize = photos.filter(p => p.file && p.file.size > MAX_PHOTO_BYTES);
+  const overSize = photos.filter(p => p.file && p.file.size >= MAX_PHOTO_BYTES);
 
   const overlay  = document.getElementById('issuesAlertOverlay');
   const list     = document.getElementById('issuesAlertList');
@@ -311,7 +339,7 @@ function checkPhotoIssues() {
   const rows = [];
   if (noGps.length)    rows.push(`<div class="issues-alert-row"><span class="issues-alert-row-count">${noGps.length}</span><span class="issues-alert-row-label">foto${noGps.length > 1 ? 's' : ''} sem GPS</span></div>`);
   if (lowMp.length)    rows.push(`<div class="issues-alert-row"><span class="issues-alert-row-count">${lowMp.length}</span><span class="issues-alert-row-label">foto${lowMp.length > 1 ? 's' : ''} abaixo de 12mp</span></div>`);
-  if (overSize.length) rows.push(`<div class="issues-alert-row"><span class="issues-alert-row-count">${overSize.length}</span><span class="issues-alert-row-label">foto${overSize.length > 1 ? 's' : ''} acima de 30mb</span></div>`);
+  if (overSize.length) rows.push(`<div class="issues-alert-row"><span class="issues-alert-row-count">${overSize.length}</span><span class="issues-alert-row-label">foto${overSize.length > 1 ? 's' : ''} com 29mb ou mais</span></div>`);
   list.innerHTML = rows.join('');
 
   if (upBtn)   upBtn.style.display   = lowMp.length    ? '' : 'none';

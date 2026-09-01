@@ -1496,6 +1496,47 @@
   }
   .meta-bulk-apply:hover { background: rgba(232,255,77,0.2); }
 
+  /* FOTOS SUPERIORES rename tool -- preview list + map pins */
+  .fsup-list {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    max-height: 220px;
+    overflow-y: auto;
+  }
+  .fsup-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 4px 8px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-family: var(--mono);
+    font-size: 10px;
+  }
+  .fsup-row b { color: var(--accent); width: 36px; flex-shrink: 0; }
+  .fsup-row span { color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .fsup-pin {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: #ff9800;
+    border: 2px solid #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    font-weight: 700;
+    color: #1a1200;
+    box-shadow: 0 1px 5px rgba(0,0,0,0.55);
+    cursor: pointer;
+  }
+  .fsup-pin.assigned { background: var(--accent); }
+
+
   /* TAB BAR */
   .tab-content {
     display: none;

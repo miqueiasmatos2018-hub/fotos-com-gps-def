@@ -77,6 +77,14 @@ function _extractHighwayCode(text) {
   return m[0].toUpperCase().replace(/[-\s]+/, '-');
 }
 
+// "BR-xxx" = federal highway; qualquer uma das siglas de UF em BR_UF_CODES
+// (AL-xxx, PB-xxx, PI-xxx...) = rodovia estadual. Junto, cobre toda
+// rodovia federal ou estadual reconhecida -- exatamente o que
+// _extractHighwayCode já sabe identificar.
+function _isFederalOrStateHighwayRef(text) {
+  return _extractHighwayCode(text) != null;
+}
+
 // Ordered list of the highways a route travels, in the order they're used —
 // e.g. ["BR-174", "RR-342", "RR-203", "BR-174"]. Only *consecutive*
 // duplicates are collapsed, so a route that leaves BR-174 and later rejoins
@@ -391,6 +399,15 @@ window.suggestAlternateRoute = function(key) {
 // point on routeB lies within `thresholdKm` of it -- the fraction that do
 // is the overlap. Sampling (not every point) keeps this fast even for long
 // routes with thousands of coordinates.
+//
+// CORREÇÃO: sempre chamar com routeA = a rota ORIGINAL (green) e
+// routeB = a candidata a alternativa -- nunca o contrário. O overlap sai
+// como fração do comprimento de routeA, então se routeB (a candidata) for
+// bem mais longa que routeA, um trecho de sobreposição real (ex: 15km de
+// uma original de 64km) fica diluído a quase nada quando medido como
+// fração dos, digamos, 190km da candidata -- e passava despercebido pelo
+// limite de 10%. Medido como fração da original (64km), os mesmos 15km são
+// ~23%, corretamente acima do limite.
 function _sampleCoords(coords, maxSamples) {
   if (coords.length <= maxSamples) return coords;
   const step = coords.length / maxSamples;
@@ -399,10 +416,14 @@ function _sampleCoords(coords, maxSamples) {
   return out;
 }
 
-function _routeOverlapFraction(coordsA, coordsB, thresholdKm) {
-  if (!coordsA.length || !coordsB.length) return 0;
-  const sampleA = _sampleCoords(coordsA, 60);
-  const sampleB = _sampleCoords(coordsB, 200);
+function _routeOverlapFraction(originalCoords, candidateCoords, thresholdKm) {
+  if (!originalCoords.length || !candidateCoords.length) return 0;
+  // 150 amostras da original (não 60): num teste real, um trecho de 7.3km
+  // sobreposto numa original de 64.8km (11.3%, deveria ter sido barrado
+  // pelo limite de 10%) só rendia ~4 das 60 amostras batendo -- resolução
+  // grossa demais para pegar uma sobreposição bem em cima do limite.
+  const sampleA = _sampleCoords(originalCoords, 150);
+  const sampleB = _sampleCoords(candidateCoords, 300);
   let close = 0;
   for (const pa of sampleA) {
     let minD = Infinity;
@@ -416,6 +437,98 @@ function _routeOverlapFraction(coordsA, coordsB, thresholdKm) {
   return close / sampleA.length;
 }
 
+// ── REAL HIGHWAY INTERSECTIONS (used by useGreenRoutePoints below) ─────────
+// Instead of guessing a detour via-point by offsetting perpendicular to the
+// straight line (see _offsetDetourSearch further down, kept as a fallback),
+// this looks for actual crossings between green's own highway and any
+// OTHER recognized federal/state highway, and uses the nearest one as the
+// via-point -- a real junction the road network already has, rather than
+// an arbitrary point in a field.
+const HIGHWAY_INTERSECTION_RADIUS_KM = 0.05; // 50m -- OSM/GPS alignment slack between two crossing ways
+const HIGHWAY_INTERSECTION_MAX_TRIES = 15;   // caps OSRM calls when many crossings exist along a long route
+
+function _cumulativeDistancesKm(coords) {
+  const dist = [0];
+  for (let i = 1; i < coords.length; i++) {
+    dist.push(dist[i - 1] + _haversineKm(coords[i - 1].lat, coords[i - 1].lng, coords[i].lat, coords[i].lng));
+  }
+  return dist;
+}
+
+function _nearestCoordIndex(coords, lat, lng) {
+  let bestI = 0, bestD = Infinity;
+  coords.forEach((c, i) => {
+    const d = _haversineKm(c.lat, c.lng, lat, lng);
+    if (d < bestD) { bestD = d; bestI = i; }
+  });
+  return bestI;
+}
+
+// Finds points where a DIFFERENT highway (not whatever ref(s) green itself
+// is currently on) crosses within HIGHWAY_INTERSECTION_RADIUS_KM of green's
+// road, ordered by how close each crossing is to whichever end of green's
+// route (start OR end) is nearest -- the idea being to leave green's road
+// as early as possible from either direction, not necessarily starting
+// from the first stop specifically.
+//
+// A single OSM way can carry more than one route number on its "ref" tag
+// when two routes run concurrently (e.g. "BR-101;BR-116") -- _wayRefCodes
+// extracts ALL of them, not just the first match, so a "crossing" that's
+// actually a continuation of green's own road under a second ref isn't
+// mistaken for a genuinely different highway.
+function _wayRefCodes(refText) {
+  if (!refText) return [];
+  const codes = [];
+  String(refText).split(/[;,]/).forEach(part => {
+    const code = _extractHighwayCode(part);
+    if (code) codes.push(code);
+  });
+  return codes;
+}
+
+function _segmentLengthKm(seg) {
+  let len = 0;
+  for (let i = 1; i < seg.length; i++) len += _haversineKm(seg[i - 1].lat, seg[i - 1].lon, seg[i].lat, seg[i].lon);
+  return len;
+}
+
+const HIGHWAY_CROSSING_MAX_LENGTH_KM = 0.3; // a genuine crossing is brief; a long near-route stretch is a parallel/concurrent road, not a crossing
+
+const HIGHWAY_CROSSING_MIN_TIP_DIST_KM = 1; // um cruzamento colado bem no início/fim não força desvio nenhum -- o OSRM só devolve a mesma rota de sempre
+
+async function _findHighwayIntersections(greenCoords, greenRefs) {
+  const bounds = L.latLngBounds(greenCoords.map(c => [c.lat, c.lng])).pad(0.05);
+  const bbox = {
+    xmin: _lngLatToMercatorXY(bounds.getWest(), 0).x,
+    xmax: _lngLatToMercatorXY(bounds.getEast(), 0).x,
+    ymin: _lngLatToMercatorXY(0, bounds.getSouth()).y,
+    ymax: _lngLatToMercatorXY(0, bounds.getNorth()).y
+  };
+  const ways = await _fetchRoadRefWaysInBBox(bbox);
+
+  const grid = _buildRouteProximityGrid(greenCoords);
+  const crossings = [];
+  ways.forEach(way => {
+    const codes = _wayRefCodes(way.tags && way.tags.ref);
+    if (!codes.length || codes.some(c => greenRefs.has(c))) return; // mesma rodovia que o verde já percorre -- não conta
+    _extractNearRouteSegments(way, grid, HIGHWAY_INTERSECTION_RADIUS_KM).forEach(seg => {
+      if (_segmentLengthKm(seg) > HIGHWAY_CROSSING_MAX_LENGTH_KM) return; // via paralela/concorrente, não um cruzamento
+      const mid = seg[Math.floor(seg.length / 2)];
+      crossings.push({ lat: mid.lat, lng: mid.lon, ref: codes[0] });
+    });
+  });
+
+  const cum = _cumulativeDistancesKm(greenCoords);
+  const total = cum[cum.length - 1];
+  crossings.forEach(c => {
+    const idx = _nearestCoordIndex(greenCoords, c.lat, c.lng);
+    c.tipDistKm = Math.min(cum[idx], total - cum[idx]);
+  });
+  const filtered = crossings.filter(c => c.tipDistKm >= HIGHWAY_CROSSING_MIN_TIP_DIST_KM);
+  filtered.sort((a, b) => a.tipDistKm - b.tipDistKm);
+  return filtered;
+}
+
 // "🟢→🔴" toolbar button on the red route panel — forces a genuine detour
 // between the FIRST and LAST point of the green route (not its intermediate
 // stops, and not just asking OSRM for "alternatives").
@@ -426,17 +539,19 @@ function _routeOverlapFraction(coordsA, coordsB, thresholdKm) {
 // different area entirely -- which is what an actual detour needs to be
 // useful if part of the green road is blocked or impassable.
 //
-// So instead, this tries routing through an artificial via-point offset to
-// one side of the direct line between start and end, at a few different
-// distances and on both sides, actually forcing the road network to be
-// searched elsewhere. Each candidate's real road geometry is compared
-// against green's actual path (not just its waypoints) to measure how much
-// they truly overlap; whichever candidate diverges enough from green (and
-// among those, is shortest) becomes the new red route -- as a normal
-// 3-stop route (start, the detour via-point, end) that can still be
-// dragged/edited like any other.
+// Primary strategy: route through the nearest REAL crossing between
+// green's highway and another recognized federal/state highway (see
+// _findHighwayIntersections above) -- a genuine junction the road network
+// already has, tried nearest-to-either-end first. Falls back to guessing a
+// via-point offset perpendicular to the straight line (the original
+// approach) only when no such crossing is found nearby at all. Either way,
+// each candidate's real road geometry is compared against green's actual
+// path to measure how much they truly overlap; whichever candidate
+// diverges enough from green (and among those, is shortest) becomes the
+// new red route -- as a normal 3-stop route (start, the via-point, end)
+// that can still be dragged/edited like any other.
 const ROUTE_OVERLAP_THRESHOLD_KM = 0.15; // ~150m: closer than this counts as "same road"
-const ROUTE_DIFFERENT_ENOUGH = 0.1;      // less than 10% of the path may overlap with green
+const ROUTE_DIFFERENT_ENOUGH = 0.05;     // less than 5% of the original route's length may overlap with the candidate
 
 function _perpendicularOffsetPoint(first, last, offsetKm, side) {
   const midLat = (first.lat + last.lat) / 2;
@@ -473,6 +588,134 @@ async function _fetchOsrmRoute(points) {
   }
 }
 
+// Ranks a candidate by two requirements together: does it genuinely
+// diverge from green's road, AND does it stay mostly on recognized
+// federal/state highways. 0 = meets both (best), 3 = meets neither.
+function _detourCandidateTier(c) {
+  const diverges  = c.overlap < ROUTE_DIFFERENT_ENOUGH;
+  const onHighway = c.highwayFraction == null || c.highwayFraction >= HIGHWAY_FRACTION_MIN;
+  if (diverges && onHighway) return 0;
+  if (diverges) return 1;
+  if (onHighway) return 2;
+  return 3;
+}
+
+// Whether `candidate` should replace `best`. Tier comes first always. Within
+// the same tier: if that tier is 0 (already good enough on both counts),
+// shortest wins, matching what was actually asked for -- the shortest
+// qualifying detour. Otherwise (no candidate tried yet reaches tier 0), the
+// LEAST overlapping one wins instead of the shortest -- picking the
+// shortest among a set of "not different enough" candidates is
+// self-defeating, since the shortest path between the same two endpoints
+// tends to just be green's own road again.
+function _isBetterDetourCandidate(candidate, best) {
+  if (!candidate) return false;
+  if (!best) return true;
+  const candTier = _detourCandidateTier(candidate);
+  const bestTier = _detourCandidateTier(best);
+  if (candTier !== bestTier) return candTier < bestTier;
+  return candTier === 0 ? candidate.distanceKm < best.distanceKm : candidate.overlap < best.overlap;
+}
+
+// Lembra os via-points já sugeridos para o desvio da rota original atual,
+// para que clicar de novo no botão sempre proponha algo diferente do que
+// já apareceu -- sem isso, como a rota original não muda entre os
+// cliques, a busca simplesmente recalculava e devolvia exatamente a mesma
+// interseção/deslocamento de sempre. É "soft": se algum dia todas as
+// opções encontradas já tiverem sido sugeridas, volta a considerá-las
+// (melhor repetir uma do que não sugerir nada). Zerado sempre que a rota
+// original muda (fingerprint = início+fim dela) ou quando a Rota
+// Alternativa é limpa manualmente.
+let _detourHistory = { fingerprint: null, vias: [] };
+const DETOUR_HISTORY_MIN_DIST_KM = 0.5; // uma via a menos de 500m de uma já sugerida conta como "a mesma"
+
+function _detourFingerprint(first, last) {
+  return `${first.lat.toFixed(5)},${first.lng.toFixed(5)}|${last.lat.toFixed(5)},${last.lng.toFixed(5)}`;
+}
+
+function _isViaAlreadySuggested(via) {
+  return _detourHistory.vias.some(v => _haversineKm(v.lat, v.lng, via.lat, via.lng) < DETOUR_HISTORY_MIN_DIST_KM);
+}
+
+function _preferFreshVias(candidates) {
+  const fresh = candidates.filter(c => !_isViaAlreadySuggested(c));
+  return fresh.length ? fresh : candidates;
+}
+
+// Primary strategy: try routing through each real highway crossing found
+// near green's road (nearest-to-either-end first, capped at
+// HIGHWAY_INTERSECTION_MAX_TRIES), stopping as soon as one both diverges
+// from green AND stays on recognized highways. Returns the best candidate
+// tried (possibly not tier 0), or null if no crossing was found at all.
+async function _intersectionDetourSearch(first, last, greenCoords, greenRefs) {
+  let crossings;
+  try {
+    crossings = await _findHighwayIntersections(greenCoords, greenRefs);
+  } catch (err) {
+    console.warn('Busca por interseções de rodovia falhou, caindo para o método por deslocamento:', err);
+    return null;
+  }
+  if (!crossings.length) return null;
+  const candidates = _preferFreshVias(crossings);
+
+  let best = null;
+  for (const crossing of candidates.slice(0, HIGHWAY_INTERSECTION_MAX_TRIES)) {
+    const result = await _fetchOsrmRoute([first, crossing, last]);
+    if (!result) continue;
+    const overlap = _routeOverlapFraction(greenCoords, result.coords, ROUTE_OVERLAP_THRESHOLD_KM);
+    const candidate = {
+      via: crossing, coords: result.coords, distanceKm: result.distanceKm,
+      overlap, highwayFraction: result.highwayFraction
+    };
+    if (_isBetterDetourCandidate(candidate, best)) best = candidate;
+    if (_detourCandidateTier(best) === 0) break;
+  }
+  return best;
+}
+
+// Fallback strategy (only used when no real highway crossing was found near
+// green's road at all): guesses a via-point offset perpendicular to the
+// straight line between start and end, at a few different distances and on
+// both sides, actually forcing the road network to be searched elsewhere.
+async function _offsetDetourSearch(first, last, greenCoords) {
+  const straightKm = _haversineKm(first.lat, first.lng, last.lat, last.lng);
+  const offsetFractions = [0.25, 0.45, 0.7, 1.0];
+
+  // Monta os 8 pontos candidatos (4 distâncias x 2 lados) antes de tentar
+  // qualquer um, para poder preferir os que ainda não foram sugeridos
+  // nesta sessão (ver _detourHistory).
+  const allVias = [];
+  offsetFractions.forEach(frac => {
+    const offsetKm = Math.max(straightKm * frac, 5); // nunca menos que 5km de desvio
+    [1, -1].forEach(side => allVias.push(_perpendicularOffsetPoint(first, last, offsetKm, side)));
+  });
+  const candidates = _preferFreshVias(allVias);
+
+  let best = null;
+  // Dois de cada vez (mesma ideia de antes: os dois lados de uma mesma
+  // distância) em paralelo, em vez de um por um em série.
+  for (let i = 0; i < candidates.length; i += 2) {
+    const batch = candidates.slice(i, i + 2);
+    const settled = await Promise.all(batch.map(via =>
+      _fetchOsrmRoute([first, via, last]).then(result => (result ? { via, result } : null))
+    ));
+    for (const entry of settled) {
+      if (!entry) continue;
+      const { via, result } = entry;
+      const overlap = _routeOverlapFraction(greenCoords, result.coords, ROUTE_OVERLAP_THRESHOLD_KM);
+      const candidate = {
+        via, coords: result.coords, distanceKm: result.distanceKm,
+        overlap, highwayFraction: result.highwayFraction
+      };
+      if (_isBetterDetourCandidate(candidate, best)) best = candidate;
+    }
+    // Stop widening the search as soon as a fully-qualifying detour (tier 0)
+    // is found — no need to push further out than needed.
+    if (best && _detourCandidateTier(best) === 0) break;
+  }
+  return best;
+}
+
 window.useGreenRoutePoints = async function() {
   const src = ROUTES.b; // green / Rota Original
   const dst = ROUTES.a; // red   / Rota Alternativa
@@ -489,62 +732,47 @@ window.useGreenRoutePoints = async function() {
 
   const first = src.waypoints[0];
   const last  = src.waypoints[src.waypoints.length - 1];
-  const straightKm = _haversineKm(first.lat, first.lng, last.lat, last.lng);
 
-  showToast('🔎 Procurando um desvio por vias estaduais/federais…');
+  // Zera o histórico de vias já sugeridas se a rota original mudou desde a
+  // última vez (início/fim diferentes) -- senão, mantém, para que clicar
+  // de novo no botão sempre proponha algo diferente do que já apareceu.
+  const fp = _detourFingerprint(first, last);
+  if (_detourHistory.fingerprint !== fp) _detourHistory = { fingerprint: fp, vias: [] };
 
-  // Ranks a candidate by two requirements together: does it genuinely
-  // diverge from green's road, AND does it stay mostly on recognized
-  // federal/state highways. 0 = meets both (best), 3 = meets neither.
-  function _candidateTier(c) {
-    const diverges  = c.overlap < ROUTE_DIFFERENT_ENOUGH;
-    const onHighway = c.highwayFraction == null || c.highwayFraction >= HIGHWAY_FRACTION_MIN;
-    if (diverges && onHighway) return 0;
-    if (diverges) return 1;
-    if (onHighway) return 2;
-    return 3;
-  }
+  showToast('🔎 Procurando uma interseção com outra rodovia…');
 
-  // Try progressively wider detours, on both sides of the direct line,
-  // until one both clears far enough away from green's road AND stays on
-  // federal/state highways.
-  const offsetFractions = [0.25, 0.45, 0.7, 1.0];
-  let best = null;
+  // Rodovia(s) que o verde já percorre -- uma via com esse mesmo código não
+  // conta como "outra rodovia" para fins de interseção.
+  const greenDesc = await _fetchRouteDescription(src.waypoints).catch(() => null);
+  const greenRefs = new Set((greenDesc && greenDesc.highways) || []);
 
-  for (const frac of offsetFractions) {
-    const offsetKm = Math.max(straightKm * frac, 5); // nunca menos que 5km de desvio
-    // Os dois lados eram consultados um depois do outro: até 8 idas ao OSRM
-    // em série. Em paralelo o tempo de espera cai praticamente à metade.
-    const sides = [1, -1].map(side => {
-      const via = _perpendicularOffsetPoint(first, last, offsetKm, side);
-      return _fetchOsrmRoute([first, via, last]).then(result => (result ? { via, result } : null));
-    });
-    const settled = await Promise.all(sides);
+  let best = await _intersectionDetourSearch(first, last, greenCoords, greenRefs);
+  let usedFallback = false;
 
-    for (const entry of settled) {
-      if (!entry) continue;
-      const { via, result } = entry;
-      const overlap = _routeOverlapFraction(result.coords, greenCoords, ROUTE_OVERLAP_THRESHOLD_KM);
-      const candidate = {
-        via, coords: result.coords, distanceKm: result.distanceKm,
-        overlap, highwayFraction: result.highwayFraction
-      };
-
-      if (!best) { best = candidate; continue; }
-      const candTier = _candidateTier(candidate);
-      const bestTier = _candidateTier(best);
-      if (candTier < bestTier) best = candidate;
-      else if (candTier === bestTier && candidate.distanceKm < best.distanceKm) best = candidate;
+  // Mesmo quando alguma interseção foi encontrada, ela pode não render uma
+  // rota que realmente foge da Rota Original (ex: a rodovia cruzada volta a
+  // se aproximar mais à frente) -- nesse caso, compara com o método por
+  // deslocamento em vez de simplesmente aceitar a melhor interseção
+  // disponível, que ainda poderia passar por dentro da Rota Original.
+  if (!best || _detourCandidateTier(best) !== 0) {
+    showToast(best
+      ? '🔎 Interseção encontrada não fugia o suficiente — comparando com desvio por deslocamento…'
+      : '🔎 Nenhuma interseção próxima encontrada — procurando um desvio por deslocamento…');
+    const offsetBest = await _offsetDetourSearch(first, last, greenCoords);
+    if (_isBetterDetourCandidate(offsetBest, best)) {
+      best = offsetBest;
+      usedFallback = true;
     }
-    // Stop widening the search as soon as a fully-qualifying detour (tier 0)
-    // is found — no need to push further out than needed.
-    if (best && _candidateTier(best) === 0) break;
   }
 
   if (!best) {
     showToast('⚠ Não foi possível calcular um desvio (sem conexão com o serviço de rotas?)');
     return;
   }
+
+  // Registra a via escolhida para que o próximo clique no botão prefira
+  // uma diferente (ver _detourHistory acima).
+  _detourHistory.vias.push({ lat: best.via.lat, lng: best.via.lng });
 
   dst.waypoints = [
     { lat: first.lat, lng: first.lng },
@@ -556,13 +784,14 @@ window.useGreenRoutePoints = async function() {
 
   const pct = Math.round((1 - best.overlap) * 100);
   const hwPct = best.highwayFraction != null ? Math.round(best.highwayFraction * 100) : null;
-  const tier = _candidateTier(best);
+  const tier = _detourCandidateTier(best);
+  const viaLabel = usedFallback ? '' : ' via interseção com outra rodovia';
   if (tier === 0) {
-    showToast(`Desvio encontrado — <span class="accent">${pct}%</span> diferente${hwPct != null ? `, ${hwPct}% em vias estaduais/federais` : ''} (${best.distanceKm.toFixed(1)}km)`);
+    showToast(`Desvio encontrado${viaLabel} — <span class="accent">${pct}%</span> diferente${hwPct != null ? `, ${hwPct}% em vias estaduais/federais` : ''} (${best.distanceKm.toFixed(1)}km)`);
   } else if (tier === 1) {
-    showToast(`⚠ Desvio ${pct}% diferente, mas só <span class="accent">${hwPct}%</span> do trajeto está em vias estaduais/federais`);
+    showToast(`⚠ Desvio${viaLabel} ${pct}% diferente, mas só <span class="accent">${hwPct}%</span> do trajeto está em vias estaduais/federais`);
   } else if (tier === 2) {
-    showToast(`⚠ Desvio majoritariamente em vias estaduais/federais, mas pouco diferente da Rota Original (${pct}%)`);
+    showToast(`⚠ Desvio${viaLabel} majoritariamente em vias estaduais/federais, mas pouco diferente da Rota Original (${pct}%)`);
   } else {
     showToast('⚠ Nenhum desvio ideal encontrado — usando o mais próximo disponível');
   }
@@ -630,6 +859,9 @@ window.clearRoute = function(key) {
   r.allRoutes = [];
   r.selectedRouteIdx = 0;
   r.highwayFraction = null;
+  // Limpar a Rota Alternativa é um "recomeço" -- não faz sentido o próximo
+  // clique em "Desvio" continuar evitando vias já sugeridas antes.
+  if (key === 'a') _detourHistory = { fingerprint: null, vias: [] };
   _updateRouteSuffixDisplay(key);
   _renderRouteStops(key);
   _renderRouteAlternatives(key);
@@ -895,7 +1127,7 @@ function _buildRouteProximityGrid(routePts) {
   return grid;
 }
 
-function _isPointNearRoute(grid, lat, lng) {
+function _isPointNearRoute(grid, lat, lng, radiusKm = ROAD_NEAR_ROUTE_THRESHOLD_KM) {
   const cellLat = Math.floor(lat / ROAD_NEAR_ROUTE_GRID_CELL_DEG);
   const cellLng = Math.floor(lng / ROAD_NEAR_ROUTE_GRID_CELL_DEG);
   for (let dLat = -1; dLat <= 1; dLat++) {
@@ -903,7 +1135,7 @@ function _isPointNearRoute(grid, lat, lng) {
       const pts = grid.get(`${cellLat + dLat},${cellLng + dLng}`);
       if (!pts) continue;
       for (const p of pts) {
-        if (_haversineKm(lat, lng, p.lat, p.lng) <= ROAD_NEAR_ROUTE_THRESHOLD_KM) return true;
+        if (_haversineKm(lat, lng, p.lat, p.lng) <= radiusKm) return true;
       }
     }
   }
@@ -918,12 +1150,12 @@ function _isPointNearRoute(grid, lat, lng) {
 // the way that genuinely runs alongside the route is kept, so its label
 // and line no longer end up on an unrelated stretch of a crossing road.
 // Segments of a single touching point (length 1) are discarded.
-function _extractNearRouteSegments(way, grid) {
+function _extractNearRouteSegments(way, grid, radiusKm = ROAD_NEAR_ROUTE_THRESHOLD_KM) {
   if (!way.geometry || way.geometry.length < 2) return [];
   const segments = [];
   let current = null;
   way.geometry.forEach(pt => {
-    if (_isPointNearRoute(grid, pt.lat, pt.lon)) {
+    if (_isPointNearRoute(grid, pt.lat, pt.lon, radiusKm)) {
       if (!current) current = [];
       current.push(pt);
     } else if (current) {
@@ -1394,7 +1626,23 @@ window.exportRoutesImage = async function() {
     const roadWaysAllowed = allowedHighwayRefs.size
       ? roadWaysRaw.filter(w => allowedHighwayRefs.has(_extractHighwayCode(w.tags && w.tags.ref)))
       : [];
-    const roadWays = _filterRoadWaysNearRoute(roadWaysAllowed, routePts);
+    const roadWaysOnRoute = _filterRoadWaysNearRoute(roadWaysAllowed, routePts);
+
+    // Além do trajeto em si, toda rodovia FEDERAL (BR-xxx) OU ESTADUAL
+    // (sigla da UF, ex. AL-xxx, PB-xxx, PI-xxx) que aparecer no
+    // enquadramento da imagem também deve ser traçada/rotulada, mesmo que
+    // a rota não passe por ela -- desenhada com a geometria completa (sem
+    // o recorte "perto da rota" acima, já que o objetivo aqui é justamente
+    // mostrá-la fora da rota). Só entram vias (elementos OSM) que ainda
+    // não fazem parte de roadWaysAllowed, para não desenhar/rotular a
+    // mesma via duas vezes.
+    const onRouteWayIds = new Set(roadWaysAllowed.map(w => w.id));
+    const roadWaysOffRoute = roadWaysRaw
+      .filter(w => !onRouteWayIds.has(w.id) && _isFederalOrStateHighwayRef(w.tags && w.tags.ref))
+      .map(w => ({ tags: w.tags, segments: (w.geometry && w.geometry.length >= 2) ? [w.geometry] : [] }))
+      .filter(w => w.segments.length);
+
+    const roadWays = roadWaysOnRoute.concat(roadWaysOffRoute);
 
     const canvas = document.createElement('canvas');
     canvas.width = ROUTE_IMAGE_WIDTH;

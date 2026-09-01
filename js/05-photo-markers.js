@@ -12,6 +12,20 @@
 // desligava a edição sem mudar o rótulo do botão).
 let metaEditMode = false;
 
+// A célula "Data" do painel de detalhes é editada como o mesmo texto já
+// formatado (dd/mm/aaaa, hh:mm:ss) que aparece na tela -- precisa ser
+// reconvertida para um objeto Date (o mesmo tipo que o EXIF já traz ao ser
+// lido) antes de gravar em photo.exif.DateTimeOriginal. Sem isso,
+// _buildExifObject (06-export.js) recebia uma string nesse formato, não
+// reconhecia e não conseguia escrever a data nova no arquivo exportado.
+function _parsePtBrDateTime(text) {
+  const m = String(text).trim().match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})[,]?\s+(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+  if (!m) return null;
+  const [, d, mo, y, h, mi, s] = m;
+  const date = new Date(+y, +mo - 1, +d, +h, +mi, s ? +s : 0);
+  return isNaN(date.getTime()) ? null : date;
+}
+
 function buildPhotoPopupHtml(photo) {
   const exif = photo.exif || {};
   const id = photo.id;
@@ -310,18 +324,6 @@ function selectPhoto(id) {
 
 function showDetail(photo) {
   const exif = photo.exif || {};
-  // editable fields: [key, label, exifKey, format hint]
-  const editableFields = [
-    ['DateTimeOriginal', 'Data', 'datetime-local'],
-    ['Make', 'Marca da Câmera', 'text'],
-    ['Model', 'Modelo da Câmera', 'text'],
-    ['LensModel', 'Lente', 'text'],
-    ['FocalLength', 'Distancia Focal (mm)', 'number'],
-    ['FNumber', 'Abertura (f/)', 'number'],
-    ['ISO', 'ISO', 'number'],
-    ['Software', 'Software', 'text'],
-    ['GPSAltitude', 'GPS Alt (m)', 'number'],
-  ];
 
   const fields = [
     ['Nome do Arquivo', photo.name, null],
@@ -374,6 +376,20 @@ function commitMetaEdit(el, photo) {
   // digitar nada já empilhava um "desfazer" vazio, e o Ctrl+Z precisava ser
   // apertado várias vezes para surtir efeito.
   if (!newVal || newVal === el.dataset.original) return;
+
+  // Valida a Data ANTES de empilhar o undo/aplicar qualquer coisa -- uma
+  // data com formato inválido não deve deixar um "desfazer" vazio na pilha
+  // nem sobrescrever o valor válido que já estava lá.
+  let parsedDate = null;
+  if (metaKey === 'DateTimeOriginal') {
+    parsedDate = _parsePtBrDateTime(newVal);
+    if (!parsedDate) {
+      showToast('⚠️ Data inválida — use o formato dd/mm/aaaa, hh:mm:ss');
+      el.textContent = el.dataset.original;
+      return;
+    }
+  }
+
   pushUndo(photo);
 
   // Persist into photo object
@@ -383,6 +399,9 @@ function commitMetaEdit(el, photo) {
   } else if (metaKey === 'lng') {
     const v = parseFloat(newVal);
     if (!isNaN(v)) { photo.lng = v; photo.exif.longitude = v; }
+  } else if (metaKey === 'DateTimeOriginal') {
+    if (!photo.exif) photo.exif = {};
+    photo.exif.DateTimeOriginal = parsedDate;
   } else {
     if (!photo.exif) photo.exif = {};
     const numFields = ['FocalLength', 'FNumber', 'ISO', 'GPSAltitude'];

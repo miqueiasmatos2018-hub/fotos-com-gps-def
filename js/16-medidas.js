@@ -35,6 +35,13 @@ const MEDIDAS_SUFFIX_PATTERNS = [
   [/LE_INICIO_OAE/i, 'LE_INICIO_OAE'],
   [/LD_FINAL_OAE/i,  'LD_FINAL_OAE'],
   [/LE_FINAL_OAE/i,  'LE_FINAL_OAE'],
+  // Variantes sem sufixo nenhum (ex: "LD_INICIO" puro) -- checadas por
+  // último, depois de todas as mais específicas acima, para não "roubar"
+  // o _OAE/PONTE de dentro do groupKey de um nome que já tem um desses.
+  [/LD[\s_]?INICIO\b/i, 'LD_INICIO_OAE'],
+  [/LE[\s_]?INICIO\b/i, 'LE_INICIO_OAE'],
+  [/LD[\s_]?FINAL\b/i,  'LD_FINAL_OAE'],
+  [/LE[\s_]?FINAL\b/i,  'LE_FINAL_OAE'],
 ];
 const MEDIDAS_POINT_ORDER = ['LE_INICIO_OAE', 'LD_INICIO_OAE', 'LD_FINAL_OAE', 'LE_FINAL_OAE'];
 

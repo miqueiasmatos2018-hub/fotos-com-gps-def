@@ -38,6 +38,10 @@ window.switchTab = function(tab) {
     if (btn)     btn.classList.toggle('active',     t === tab);
     if (content) content.classList.toggle('active', t === tab);
   });
+  // Header animation on the right swaps to match whichever tab is open.
+  document.querySelectorAll('.tab-anim').forEach(a => {
+    a.classList.toggle('active', a.classList.contains('tab-anim-' + tab));
+  });
 };
 
 window.toggleBulkEdit = function() {

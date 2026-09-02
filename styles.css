@@ -64,6 +64,53 @@
     user-select: none;
     display: flex;
     align-items: center;
+    gap: 12px;
+  }
+
+  /* Small looping bridge-with-traffic animation, half the height of the
+     logo block (MS + Automations stacked) and vertically centered against
+     it. Purely decorative (aria-hidden) -- structure is static SVG, only
+     the car and drone groups move via CSS transform. */
+  .logo-bridge {
+    height: 40px;
+    aspect-ratio: 3 / 1;
+    flex-shrink: 0;
+    overflow: hidden;
+  }
+  .logo-bridge svg { width: 100%; height: 100%; display: block; overflow: visible; }
+  .logo-bridge .bridge-deck,
+  .logo-bridge .bridge-pier,
+  .logo-bridge .bridge-support { stroke: var(--text2); stroke-width: 1.6; stroke-linecap: round; }
+  .logo-bridge .bridge-cable { fill: none; stroke: var(--border2); stroke-width: 1; }
+  .logo-bridge .bridge-hanger { stroke: var(--border2); stroke-width: 0.8; }
+  .logo-bridge .bridge-car rect { fill: var(--accent); }
+  .logo-bridge .bridge-car-2 rect { fill: var(--accent2); }
+  .logo-bridge .bridge-car-3 rect { fill: #4dffef; }
+
+  .logo-bridge .bridge-car { animation: bridge-car-pass 3.2s linear infinite; }
+  .logo-bridge .bridge-car-1 { animation-delay: 0s; }
+  .logo-bridge .bridge-car-2 { animation-delay: -1.6s; animation-duration: 2.6s; }
+  .logo-bridge .bridge-car-3 { animation-delay: -0.8s; animation-duration: 3.8s; }
+
+  @keyframes bridge-car-pass {
+    0%   { transform: translateX(-10px); }
+    100% { transform: translateX(126px); }
+  }
+
+  /* Drone hovering back and forth above the bridge deck. */
+  .logo-bridge .bridge-drone   { animation: bridge-drone-fly 4.5s ease-in-out infinite; }
+  .logo-bridge .drone-arm      { stroke: var(--text2); stroke-width: 1; }
+  .logo-bridge .drone-body     { fill: var(--accent2); }
+  .logo-bridge .drone-rotor    { fill: var(--border2); animation: drone-rotor-blur 0.6s ease-in-out infinite; }
+  @keyframes bridge-drone-fly {
+    0%   { transform: translate(-8px, 9px); }
+    48%  { transform: translate(60px, 5px); }
+    50%  { transform: translate(62px, 5px); }
+    100% { transform: translate(130px, 9px); }
+  }
+  @keyframes drone-rotor-blur {
+    0%, 100% { opacity: 0.9; r: 2.1px; }
+    50%      { opacity: 0.4; r: 1.3px; }
   }
 
   .logo-ms {
@@ -212,6 +259,205 @@
     text-align: right;
     line-height: 1.7;
     letter-spacing: 0.5px;
+  }
+
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 34px;
+  }
+
+  /* Right-side header animation: one small SVG/emoji/text widget per tab,
+     only the one matching the active tab is shown. Swapped by switchTab()
+     in 09-tabs-bulk.js toggling the .active class. */
+  .header-tab-anim {
+    position: relative;
+    width: 56px;
+    height: 40px;
+    flex-shrink: 0;
+  }
+  .tab-anim {
+    display: none;
+    position: absolute;
+    inset: 0;
+    align-items: center;
+    justify-content: center;
+  }
+  .tab-anim.active { display: flex; }
+  .tab-anim svg { width: 52px; height: 40px; overflow: visible; }
+
+  /* Fotos: camera + flash burst */
+  .tab-anim-photos .cam-body   { fill: var(--panel); stroke: var(--text2); stroke-width: 1.2; }
+  .tab-anim-photos .cam-top    { fill: var(--panel); stroke: var(--text2); stroke-width: 1.2; }
+  .tab-anim-photos .cam-lens-outer { fill: none; stroke: var(--text2); stroke-width: 1.2; }
+  .tab-anim-photos .cam-lens-inner { fill: var(--accent); }
+  .tab-anim-photos .cam-flash  { fill: #ffffff; opacity: 0; animation: cam-flash-pop 2.4s ease-in-out infinite; }
+  .tab-anim-photos .cam-flash-burst {
+    fill: #ffffff; opacity: 0; transform-origin: 30px 9px;
+    animation: cam-flash-burst 2.4s ease-in-out infinite;
+  }
+  @keyframes cam-flash-pop {
+    0%, 8%, 100% { opacity: 0; }
+    3% { opacity: 1; }
+  }
+  @keyframes cam-flash-burst {
+    0%, 6%, 100% { opacity: 0; transform: scale(1); }
+    3% { opacity: 0.9; transform: scale(4.5); }
+  }
+
+  /* Pontos: bouncing pin, styled like a flat map-marker icon (orange-red
+     teardrop, grey center hole, dark outline, green ground shadow). */
+  .tab-anim-pontos { flex-direction: column; gap: 0; }
+  .pin-icon { width: 34px; height: 40px; overflow: visible; display: block; }
+  .pin-icon-marker {
+    animation: pin-bounce 1.1s ease-in-out infinite;
+    transform-box: fill-box;
+    transform-origin: bottom center;
+  }
+  .pin-icon-body { fill: #ff5722; stroke: #2c2c2c; stroke-width: 2.4; stroke-linejoin: round; }
+  .pin-icon-hole { fill: #ccd1d9; stroke: #2c2c2c; stroke-width: 1.8; }
+  .pin-icon-shadow {
+    fill: #8bc63f;
+    stroke: #2c2c2c;
+    stroke-width: 1.6;
+    animation: pin-shadow-squash 1.1s ease-in-out infinite;
+    transform-box: fill-box;
+    transform-origin: center;
+  }
+  @keyframes pin-bounce {
+    0%, 100% { transform: translateY(0); }
+    50%      { transform: translateY(-8px); }
+  }
+  @keyframes pin-shadow-squash {
+    0%, 100% { transform: scaleX(1);   opacity: 1; }
+    50%      { transform: scaleX(0.7); opacity: 0.7; }
+  }
+
+  /* Rotas: top-down car following a route (native SMIL animateMotion) */
+  .tab-anim-rotas .route-line { fill: none; stroke: var(--border2); stroke-width: 1.4; stroke-dasharray: 3 2; }
+  .tab-anim-rotas .car-body       { fill: var(--accent); }
+  .tab-anim-rotas .car-windshield { fill: rgba(0,0,0,0.55); }
+  .tab-anim-rotas .car-roofline   { fill: rgba(0,0,0,0.3); }
+  .tab-anim-rotas .car-light      { fill: #fff8d6; }
+
+  /* Dados: monitor "typing" lines of text */
+  .tab-anim-medidas .monitor-frame  { fill: var(--panel); stroke: var(--text2); stroke-width: 1.2; }
+  .tab-anim-medidas .monitor-screen { fill: #060606; }
+  .tab-anim-medidas .monitor-stand,
+  .tab-anim-medidas .monitor-base   { fill: var(--text2); }
+  .tab-anim-medidas .mon-line { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-linecap: round; opacity: 0; }
+  .tab-anim-medidas .mon-line-1 { stroke-dasharray: 11; stroke-dashoffset: 11; animation: mon-type-1 3.6s ease-in-out infinite; animation-delay: 0s; }
+  .tab-anim-medidas .mon-line-2 { stroke-dasharray: 17; stroke-dashoffset: 17; animation: mon-type-2 3.6s ease-in-out infinite; animation-delay: 0.45s; }
+  .tab-anim-medidas .mon-line-3 { stroke-dasharray: 8;  stroke-dashoffset: 8;  animation: mon-type-3 3.6s ease-in-out infinite; animation-delay: 0.9s; }
+  @keyframes mon-type-1 {
+    0%          { stroke-dashoffset: 11; opacity: 0; }
+    4%          { opacity: 1; }
+    28%, 78%    { stroke-dashoffset: 0; opacity: 1; }
+    92%, 100%   { stroke-dashoffset: 11; opacity: 0; }
+  }
+  @keyframes mon-type-2 {
+    0%          { stroke-dashoffset: 17; opacity: 0; }
+    4%          { opacity: 1; }
+    28%, 78%    { stroke-dashoffset: 0; opacity: 1; }
+    92%, 100%   { stroke-dashoffset: 17; opacity: 0; }
+  }
+  @keyframes mon-type-3 {
+    0%          { stroke-dashoffset: 8; opacity: 0; }
+    4%          { opacity: 1; }
+    28%, 78%    { stroke-dashoffset: 0; opacity: 1; }
+    92%, 100%   { stroke-dashoffset: 8; opacity: 0; }
+  }
+
+  /* Elementos: a crane carries each deck segment into place, one at a
+     time, left to right, like an OAE being assembled span by span. The
+     carriage (trolley + cable + load) travels along the rail and the
+     cable retracts/extends at each stop; the matching deck segment below
+     pops into place right as the load "lands". */
+  .tab-anim-elementos .build-tower { stroke: var(--text2); stroke-width: 1.3; }
+  .tab-anim-elementos .build-cable { fill: none; stroke: var(--border2); stroke-width: 1; }
+  .tab-anim-elementos .build-hanger { stroke: var(--border2); stroke-width: 0.7; }
+
+  /* A crane truck drives along the deck it has already built, reaching
+     its boom one segment ahead to place the next piece before rolling
+     forward onto it -- instead of a fixed overhead gantry. */
+  .tab-anim-elementos .crane-carriage    { animation: crane-move 5s linear infinite; }
+  .tab-anim-elementos .crane-boom        { stroke: var(--text2); stroke-width: 1; }
+  .tab-anim-elementos .crane-truck-body  { fill: var(--text2); }
+  .tab-anim-elementos .crane-truck-cab   { fill: var(--panel); stroke: var(--text2); stroke-width: 0.8; }
+  .tab-anim-elementos .crane-truck-wheel { fill: #1a1a1a; stroke: var(--border2); stroke-width: 0.6; }
+  .tab-anim-elementos .crane-cable       { stroke: var(--text2); stroke-width: 0.8; }
+  .tab-anim-elementos .crane-load        { fill: var(--accent); }
+  .tab-anim-elementos .crane-cable-group {
+    transform-box: fill-box;
+    transform-origin: top;
+    animation: crane-hoist 5s linear infinite;
+  }
+  @keyframes crane-move {
+    0%, 18%      { transform: translateX(1px); }
+    20%, 38%     { transform: translateX(7px); }
+    40%, 58%     { transform: translateX(13px); }
+    60%, 78%     { transform: translateX(19px); }
+    80%, 98%     { transform: translateX(25px); }
+    100%         { transform: translateX(1px); }
+  }
+  @keyframes crane-hoist {
+    0%, 14%      { transform: scaleY(1); }
+    18%, 20%     { transform: scaleY(0.15); }
+    24%, 34%     { transform: scaleY(1); }
+    38%, 40%     { transform: scaleY(0.15); }
+    44%, 54%     { transform: scaleY(1); }
+    58%, 60%     { transform: scaleY(0.15); }
+    64%, 74%     { transform: scaleY(1); }
+    78%, 80%     { transform: scaleY(0.15); }
+    84%, 94%     { transform: scaleY(1); }
+    98%, 100%    { transform: scaleY(0.15); }
+  }
+
+  .tab-anim-elementos .deck-seg { fill: var(--accent); opacity: 0; transform-box: fill-box; transform-origin: center; }
+  .tab-anim-elementos .seg-1 { animation: deck-seg-build-1 5s linear infinite; }
+  .tab-anim-elementos .seg-2 { animation: deck-seg-build-2 5s linear infinite; }
+  .tab-anim-elementos .seg-3 { animation: deck-seg-build-3 5s linear infinite; }
+  .tab-anim-elementos .seg-4 { animation: deck-seg-build-4 5s linear infinite; }
+  .tab-anim-elementos .seg-5 { animation: deck-seg-build-5 5s linear infinite; }
+  @keyframes deck-seg-build-1 {
+    0%, 8%    { opacity: 0; transform: translateY(2px) scaleY(0.3); }
+    14%, 98%  { opacity: 1; transform: translateY(0) scaleY(1); }
+    100%      { opacity: 0; transform: translateY(2px) scaleY(0.3); }
+  }
+  @keyframes deck-seg-build-2 {
+    0%, 28%   { opacity: 0; transform: translateY(2px) scaleY(0.3); }
+    34%, 98%  { opacity: 1; transform: translateY(0) scaleY(1); }
+    100%      { opacity: 0; transform: translateY(2px) scaleY(0.3); }
+  }
+  @keyframes deck-seg-build-3 {
+    0%, 48%   { opacity: 0; transform: translateY(2px) scaleY(0.3); }
+    54%, 98%  { opacity: 1; transform: translateY(0) scaleY(1); }
+    100%      { opacity: 0; transform: translateY(2px) scaleY(0.3); }
+  }
+  @keyframes deck-seg-build-4 {
+    0%, 68%   { opacity: 0; transform: translateY(2px) scaleY(0.3); }
+    74%, 98%  { opacity: 1; transform: translateY(0) scaleY(1); }
+    100%      { opacity: 0; transform: translateY(2px) scaleY(0.3); }
+  }
+  @keyframes deck-seg-build-5 {
+    0%, 88%   { opacity: 0; transform: translateY(2px) scaleY(0.3); }
+    94%, 98%  { opacity: 1; transform: translateY(0) scaleY(1); }
+    100%      { opacity: 0; transform: translateY(2px) scaleY(0.3); }
+  }
+
+  /* Nomes: typewriter cycling through sample names */
+  .tab-anim-nomes {
+    font-family: var(--mono);
+    font-size: 8px;
+    letter-spacing: 0.4px;
+    color: var(--accent);
+    white-space: nowrap;
+    justify-content: flex-end;
+  }
+  .names-cursor { animation: names-cursor-blink 0.8s step-end infinite; margin-left: 1px; }
+  @keyframes names-cursor-blink {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0; }
   }
 
   /* TOP TAB NAV — sits centered in the header, between the logo and the
@@ -648,7 +894,12 @@
     padding-bottom: 8px;
     border-bottom: 2px solid var(--accent);
     margin-bottom: 12px;
+    cursor: pointer;
   }
+  .elem-section-head:hover { border-bottom-color: #e2ff6b; }
+  .elem-section.elem-section-collapsed .elem-section-head { margin-bottom: 0; }
+  .elem-section.elem-section-collapsed > .elem-subsection { display: none; }
+  .elem-section.elem-section-collapsed .elem-section-caret { transform: rotate(-90deg); }
   .elem-section-head .elem-tag {
     font-family: var(--mono);
     font-size: 9px;
@@ -665,8 +916,9 @@
 
   .elem-subsection { margin-top: 16px; }
   .elem-subsection:first-child { margin-top: 0; }
-  .elem-subsection-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .elem-subsection-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; cursor: pointer; }
   .elem-subsection-head::before { content: ''; width: 3px; height: 14px; background: var(--accent); flex: none; }
+  .elem-subsection-head:hover .elem-sub-label { color: #e2ff6b; }
   .elem-subsection-head .elem-sub-label {
     font-family: var(--mono);
     font-size: 11px;
@@ -676,6 +928,9 @@
     color: var(--accent);
   }
   .elem-subsection-head .elem-sub-count { font-family: var(--mono); font-size: 10px; color: var(--text2); }
+  .elem-subsection.elem-subsection-collapsed .elem-subsection-head { margin-bottom: 0; }
+  .elem-subsection.elem-subsection-collapsed .elem-group-list { display: none; }
+  .elem-subsection.elem-subsection-collapsed .elem-subsection-caret { transform: rotate(-90deg); }
 
   .elem-group-list { display: flex; flex-direction: column; gap: 8px; }
   .elem-empty-state { margin-top: 30px; text-align: center; color: var(--text2); font-family: var(--mono); font-size: 11px; }

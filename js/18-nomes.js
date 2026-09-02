@@ -515,5 +515,60 @@
   renderStatic();
   renderAll();
 
+  // Expõe os nomes gerados (pontos preenchidos) para a animação decorativa
+  // do header, que escreve/apaga esses nomes em vez de uma lista fixa.
+  window._nomesGetGeneratedNames = function(){
+    return filled.map(function(f){ return buildInfName(f.letter, f.tramo, tramoCount); });
+  };
+
+})();
+
+// ---------- header typewriter (decorative, right side of header) ----------
+// Cycles through the names actually generated in this tab (Fotos
+// Inferiores), typing and erasing each in a loop -- purely cosmetic, matches
+// the Nomes tab icon in the header when that tab is active. Falls back to
+// the fixed "Fotos Superiores" list while nothing has been generated yet.
+(function(){
+  var el = document.getElementById('namesTypewriter');
+  if (!el) return;
+  var FALLBACK = [
+    'LE INICIO, DIAGONAL SUPERIOR',
+    'LD INICIO, DIAGONAL SUPERIOR',
+    'SUPERIOR ORTOGONAL'
+  ];
+
+  function currentWords(){
+    var list = (typeof window._nomesGetGeneratedNames === 'function') ? window._nomesGetGeneratedNames() : [];
+    return list.length ? list : FALLBACK;
+  }
+
+  var words = currentWords();
+  var wordIdx = 0, charIdx = 0, deleting = false;
+
+  function tick(){
+    // Refresh the source list right as a new word starts, so a name added
+    // or removed in the tab shows up on the next pass of the loop.
+    if (charIdx === 0 && !deleting) words = currentWords();
+    var word = words[wordIdx % words.length] || '';
+    if (!deleting){
+      charIdx++;
+      el.textContent = word.slice(0, charIdx);
+      if (charIdx >= word.length){
+        deleting = true;
+        setTimeout(tick, 1100);
+        return;
+      }
+    } else {
+      charIdx--;
+      el.textContent = word.slice(0, charIdx);
+      if (charIdx <= 0){
+        charIdx = 0;
+        deleting = false;
+        wordIdx = (wordIdx + 1) % Math.max(words.length, 1);
+      }
+    }
+    setTimeout(tick, deleting ? 45 : 90);
+  }
+  setTimeout(tick, 400);
 })();
 

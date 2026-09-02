@@ -608,20 +608,30 @@ Grand total: 128;;;;;;;;;;;;
 
     sectionsToRender.forEach(function(sec){
       var sectionEl = el('div', {class:'elem-section'});
-      sectionEl.appendChild(el('div', {class:'elem-section-head'}, [
+      var sectionHead = el('div', {class:'elem-section-head'}, [
+        el('span', {class:'elem-caret elem-section-caret', text:'▾'}),
         el('span', {class:'elem-tag', text:'TRAMO'}),
         el('h2', {text: sec.label}),
         el('span', {class:'elem-section-count', text: sec.elemCount + (sec.elemCount===1?' elemento':' elementos')})
-      ]));
+      ]);
+      sectionHead.addEventListener('click', function(){
+        sectionEl.classList.toggle('elem-section-collapsed');
+      });
+      sectionEl.appendChild(sectionHead);
 
       sec.categories.forEach(function(cat){
         var subEl = el('div', {class:'elem-subsection'});
         var count = cat.groups.reduce(function(n,g){ return n + g.rows.length; }, 0);
         var labelText = cat.label + (cat.tag ? ' · ' + cat.tag : '');
-        subEl.appendChild(el('div', {class:'elem-subsection-head'}, [
+        var subHead = el('div', {class:'elem-subsection-head'}, [
+          el('span', {class:'elem-caret elem-subsection-caret', text:'▾'}),
           el('span', {class:'elem-sub-label', text: labelText}),
           el('span', {class:'elem-sub-count', text: '· ' + count + (count===1?' elemento':' elementos')})
-        ]));
+        ]);
+        subHead.addEventListener('click', function(){
+          subEl.classList.toggle('elem-subsection-collapsed');
+        });
+        subEl.appendChild(subHead);
         var listEl = el('div', {class:'elem-group-list'});
         cat.groups.forEach(function(g){
           var groupKey = sec.label + '␟' + cat.label + '␟' + (cat.tag||'') + '␟' + g.id + '␟' + g.nome;

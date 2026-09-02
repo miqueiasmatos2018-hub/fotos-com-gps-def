@@ -628,6 +628,29 @@ function _medidasCopyRow(label, value, pending) {
   return `<div class="medidas-row"><span>${label}</span><span class="medidas-row-value"><b>${escapeHtml(value)}</b>${btn}</span></div>`;
 }
 
+// LAT/LONG are truncated (not rounded) to a fixed number of decimals --
+// rounding the 8th decimal can shift the point by enough to matter when
+// pasting into the cadastro, so this cuts the string instead of doing
+// arithmetic that could round it up. String-based on purpose: multiplying
+// by 1e8 and flooring is exposed to float error right at the boundary
+// (e.g. .99999995 landing a hair under the next integer).
+function _truncDecimals(num, decimals) {
+  const neg = num < 0;
+  let str = Math.abs(num).toString();
+  if (str.indexOf('e') !== -1 || str.indexOf('E') !== -1) {
+    // Extremely small/large values that JS renders in scientific notation
+    // -- not expected for lat/lng, but toFixed() as a safe fallback still
+    // truncates correctly since expanding the exponent first would be
+    // more code than this case is worth.
+    str = Number(num).toFixed(decimals + 4);
+  }
+  const dot = str.indexOf('.');
+  let intPart = dot === -1 ? str : str.slice(0, dot);
+  let fracPart = dot === -1 ? '' : str.slice(dot + 1);
+  fracPart = fracPart.length >= decimals ? fracPart.slice(0, decimals) : fracPart.padEnd(decimals, '0');
+  return (neg ? '-' : '') + intPart + '.' + fracPart;
+}
+
 function _renderMedidasList() {
   _updateInspectionDate();
   const list  = document.getElementById('medidasList');
@@ -675,8 +698,8 @@ function _renderMedidasList() {
         <div class="medidas-row"><span>Sentido</span><b>${sentidoIcon} ${a.sentido}</b>${sentidoCm}</div>
         <div class="medidas-row"><span>Esconsidade</span>${esconsaBadge}</div>
         <div class="medidas-subhead">LD_INICIO_OAE</div>
-        ${_medidasCopyRow('LAT', ld.lat.toFixed(8), false)}
-        ${_medidasCopyRow('LONG', ld.lng.toFixed(8), false)}
+        ${_medidasCopyRow('LAT', _truncDecimals(ld.lat, 8), false)}
+        ${_medidasCopyRow('LONG', _truncDecimals(ld.lng, 8), false)}
         ${_medidasCopyRow('Altitude Geométrica', Number(ld.elevation).toFixed(2), false)}
         ${_medidasCopyRow('BR', s.dnitBr != null ? s.dnitBr : 'consultando…', s.dnitBr == null)}
         ${_medidasCopyRow('UF', s.dnitUf != null ? s.dnitUf : 'consultando…', s.dnitUf == null)}

@@ -52,19 +52,73 @@ function _highwayFractionFromRoute(osrmRoute) {
   return total > 0 ? onHighway / total : null;
 }
 
+// ── RESILIENT FETCH (timeout + one retry) ───────────────────────────────────
+// The free OSRM demo server has no SLA: it can hang, time out, or 429 under
+// any real burst of requests. Every raw OSRM call used by the detour search
+// goes through this instead of a bare fetch() -- a request that hangs past
+// OSRM_TIMEOUT_MS is aborted (so the UI never just sits there), and a single
+// failure (network error, timeout, or non-2xx) gets ONE retry after a short
+// backoff before giving up. This alone doesn't fix a server that's fully
+// down, but it stops one slow/flaky request from stalling the whole search.
+const OSRM_TIMEOUT_MS = 6000;
+const OSRM_RETRY_BACKOFF_MS = 500;
+
+function _sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+async function _fetchJsonResilient(url, { timeoutMs = OSRM_TIMEOUT_MS, retries = 1 } = {}) {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, { signal: controller.signal });
+      clearTimeout(timer);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.json();
+    } catch (err) {
+      clearTimeout(timer);
+      if (attempt === retries) {
+        console.error('Fetch falhou (desistindo após retry):', url, err);
+        return null;
+      }
+      await _sleep(OSRM_RETRY_BACKOFF_MS);
+    }
+  }
+  return null;
+}
+
+// Same as above but for plain text (XML capabilities documents, mainly) --
+// duplicated rather than sharing a body-parser param so callers doing
+// .json() get real errors on malformed JSON instead of it silently
+// succeeding as text.
+async function _fetchTextResilient(url, { timeoutMs = OSRM_TIMEOUT_MS, retries = 1 } = {}) {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, { signal: controller.signal });
+      clearTimeout(timer);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.text();
+    } catch (err) {
+      clearTimeout(timer);
+      if (attempt === retries) {
+        console.error('Fetch falhou (desistindo após retry):', url, err);
+        return null;
+      }
+      await _sleep(OSRM_RETRY_BACKOFF_MS);
+    }
+  }
+  return null;
+}
+
 // Raw OSRM fetch (bypassing the Leaflet Routing Machine control) purely to
 // check which roads a set of waypoints would actually use.
 async function _fetchOsrmHighwayFraction(points) {
   const coordStr = points.map(p => `${p.lng},${p.lat}`).join(';');
   const url = `${OSRM_SERVICE_URL}/driving/${coordStr}?overview=false&steps=true`;
-  try {
-    const res = await fetch(url);
-    const data = await res.json();
-    return _highwayFractionFromRoute(data.routes && data.routes[0]);
-  } catch (err) {
-    console.error('OSRM highway-classification fetch failed:', err);
-    return null;
-  }
+  const data = await _fetchJsonResilient(url);
+  if (!data) return null;
+  return _highwayFractionFromRoute(data.routes && data.routes[0]);
 }
 
 // Pulls the highway code (e.g. "BR-174", "RR-342") out of a road name/ref,
@@ -75,14 +129,6 @@ function _extractHighwayCode(text) {
   const m = String(text).match(HIGHWAY_REF_RE);
   if (!m) return null;
   return m[0].toUpperCase().replace(/[-\s]+/, '-');
-}
-
-// "BR-xxx" = federal highway; qualquer uma das siglas de UF em BR_UF_CODES
-// (AL-xxx, PB-xxx, PI-xxx...) = rodovia estadual. Junto, cobre toda
-// rodovia federal ou estadual reconhecida -- exatamente o que
-// _extractHighwayCode já sabe identificar.
-function _isFederalOrStateHighwayRef(text) {
-  return _extractHighwayCode(text) != null;
 }
 
 // Ordered list of the highways a route travels, in the order they're used —
@@ -105,25 +151,49 @@ function _highwaySequenceFromRoute(osrmRoute) {
   return seq;
 }
 
+// Same idea as _highwaySequenceFromRoute, but keeps the coordinate where
+// each highway starts (step.maneuver.location -- where the person actually
+// turns onto that road) instead of just the ref/name. This is what lets
+// the exported image place a "BR-174"/"RR-342"/... shield directly on the
+// route's OWN geometry, entirely from the same OSRM response the route
+// itself came from -- no Overpass, no DNIT, no external road dataset
+// needed at all. Whatever the route legitimately drives on, this finds;
+// a road with no ref/name in OSRM's data simply gets no shield, which is
+// the correct outcome (nothing to label).
+function _highwaySegmentsWithLocations(osrmRoute) {
+  const segs = [];
+  if (!osrmRoute || !osrmRoute.legs) return segs;
+  for (const leg of osrmRoute.legs) {
+    for (const step of (leg.steps || [])) {
+      const code = _extractHighwayCode(step.ref) || _extractHighwayCode(step.name);
+      const loc = step.maneuver && step.maneuver.location; // [lng, lat]
+      if (!code || !loc) continue;
+      if (!segs.length || segs[segs.length - 1].code !== code) {
+        segs.push({ code, lat: loc[1], lng: loc[0] });
+      }
+    }
+  }
+  return segs;
+}
+
 // Fetches a route and returns both its total distance and the ordered
-// sequence of highways it uses, for the exported description.
+// sequence of highways it uses (with where each one starts), for the
+// exported description and the route-image shields alike -- same OSRM
+// call already used for the TRAJETO: field, just also keeping the
+// maneuver locations this time.
 async function _fetchRouteDescription(points) {
   const coordStr = points.map(p => `${p.lng},${p.lat}`).join(';');
   const url = `${OSRM_SERVICE_URL}/driving/${coordStr}?overview=false&steps=true`;
-  try {
-    const res = await fetch(url);
-    const data = await res.json();
-    const rt = data.routes && data.routes[0];
-    if (!rt) return null;
-    return {
-      distanceKm: rt.distance / 1000,
-      highways: _highwaySequenceFromRoute(rt)
-    };
-  } catch (err) {
-    console.error('OSRM route-description fetch failed:', err);
-    return null;
-  }
+  const data = await _fetchJsonResilient(url);
+  const rt = data && data.routes && data.routes[0];
+  if (!rt) return null;
+  return {
+    distanceKm: rt.distance / 1000,
+    highways: _highwaySequenceFromRoute(rt),
+    segments: _highwaySegmentsWithLocations(rt)
+  };
 }
+
 
 // Debounced per-route wrapper around the highway check above. Only warns
 // when the fraction is genuinely known and below the threshold, and only
@@ -149,6 +219,30 @@ async function _runHighwayCheck(key) {
     showToast(`⚠ ${_composeRouteName(key)}: apenas <span class="accent">${pct}%</span> do trajeto está em vias federais/estaduais`);
   }
 }
+
+// Reports how the Rota Alternativa (A) currently compares to the Rota
+// Original (B) -- same overlap%/highway% message the automatic search
+// shows, but recomputed live any time route A settles after an edit
+// (dragging a stop, or picking a via point manually -- see
+// pickAlternateRouteVia below). Suppressed once right after the automatic
+// search itself finishes, since that flow already shows its own toast with
+// numbers computed during the search -- letting this fire too right after
+// would just repeat the same thing a moment later from a fresh OSRM call.
+let _suppressDetourQualityOnce = false;
+let _detourQualitySeq = 0;
+
+async function _runDetourQualityCheck() {
+  if (_suppressDetourQualityOnce) { _suppressDetourQualityOnce = false; return; }
+  const a = ROUTES.a, b = ROUTES.b;
+  if (!a.roadCoords || a.roadCoords.length < 2) return;
+  if (!b.roadCoords || b.roadCoords.length < 2) return;
+  const seq = ++_detourQualitySeq;
+  const overlap = _routeOverlapFraction(b.roadCoords, a.roadCoords, ROUTE_OVERLAP_THRESHOLD_KM);
+  const highwayFraction = await _fetchOsrmHighwayFraction(a.waypoints);
+  if (seq !== _detourQualitySeq) return; // resposta obsoleta, já há uma consulta mais nova em andamento
+  _showDetourQualityToast({ overlap, highwayFraction, distanceKm: a.distanceKm });
+}
+const _scheduleDetourQualityCheck = debounce(_runDetourQualityCheck, 700);
 
 
 //   PREFIX + "_" + <editable middle, optional> + "_" + <distance>KM
@@ -300,6 +394,11 @@ function _rebuildRouteControl(key) {
     // frame would hammer the rate-limited public server (and spam toasts).
     _scheduleHighwayCheck(key);
 
+    // Also keeps the Rota Alternativa's "how good is this detour" toast
+    // current as route A settles from ANY edit -- not just the automatic
+    // search button (see _runDetourQualityCheck above).
+    if (key === 'a') _scheduleDetourQualityCheck();
+
     // Keep the TRAJETO: / DIFERENÇA (KM): rows current too (same debounce
     // reasoning as above).
     _scheduleRouteResultsUpdate();
@@ -445,7 +544,8 @@ function _routeOverlapFraction(originalCoords, candidateCoords, thresholdKm) {
 // via-point -- a real junction the road network already has, rather than
 // an arbitrary point in a field.
 const HIGHWAY_INTERSECTION_RADIUS_KM = 0.05; // 50m -- OSM/GPS alignment slack between two crossing ways
-const HIGHWAY_INTERSECTION_MAX_TRIES = 15;   // caps OSRM calls when many crossings exist along a long route
+const HIGHWAY_INTERSECTION_MAX_TRIES = 6;    // caps OSRM calls when many crossings exist along a long route
+const HIGHWAY_INTERSECTION_BATCH_SIZE = 3;   // tried in parallel batches instead of one request at a time
 
 function _cumulativeDistancesKm(coords) {
   const dist = [0];
@@ -572,32 +672,51 @@ function _perpendicularOffsetPoint(first, last, offsetKm, side) {
 async function _fetchOsrmRoute(points) {
   const coordStr = points.map(p => `${p.lng},${p.lat}`).join(';');
   const url = `${OSRM_SERVICE_URL}/driving/${coordStr}?overview=full&geometries=geojson&steps=true`;
-  try {
-    const res = await fetch(url);
-    const data = await res.json();
-    if (!data.routes || !data.routes.length) return null;
-    const rt = data.routes[0];
-    return {
-      coords: rt.geometry.coordinates.map(c => ({ lat: c[1], lng: c[0] })), // geojson is [lng,lat]
-      distanceKm: rt.distance / 1000,
-      highwayFraction: _highwayFractionFromRoute(rt) // reuses the same response, no extra request
-    };
-  } catch (err) {
-    console.error('OSRM detour route fetch failed:', err);
-    return null;
-  }
+  const data = await _fetchJsonResilient(url);
+  if (!data || !data.routes || !data.routes.length) return null;
+  const rt = data.routes[0];
+  return {
+    coords: rt.geometry.coordinates.map(c => ({ lat: c[1], lng: c[0] })), // geojson is [lng,lat]
+    distanceKm: rt.distance / 1000,
+    highwayFraction: _highwayFractionFromRoute(rt) // reuses the same response, no extra request
+  };
 }
 
 // Ranks a candidate by two requirements together: does it genuinely
 // diverge from green's road, AND does it stay mostly on recognized
 // federal/state highways. 0 = meets both (best), 3 = meets neither.
-function _detourCandidateTier(c) {
-  const diverges  = c.overlap < ROUTE_DIFFERENT_ENOUGH;
-  const onHighway = c.highwayFraction == null || c.highwayFraction >= HIGHWAY_FRACTION_MIN;
+// Shared by the automatic search (via a candidate object) and the manual
+// via-point flow (called directly with plain numbers) so both report
+// quality the same way -- see _showDetourQualityToast below.
+function _detourQualityTier(overlap, highwayFraction) {
+  const diverges  = overlap < ROUTE_DIFFERENT_ENOUGH;
+  const onHighway = highwayFraction == null || highwayFraction >= HIGHWAY_FRACTION_MIN;
   if (diverges && onHighway) return 0;
   if (diverges) return 1;
   if (onHighway) return 2;
   return 3;
+}
+function _detourCandidateTier(c) {
+  return _detourQualityTier(c.overlap, c.highwayFraction);
+}
+
+// Single shared message for "how good is this detour", used both right
+// after the automatic search finishes and after a manually-picked via
+// point's route settles -- so the two paths give consistent feedback.
+function _showDetourQualityToast({ overlap, highwayFraction, distanceKm, viaLabel = '' }) {
+  const pct = Math.round((1 - overlap) * 100);
+  const hwPct = highwayFraction != null ? Math.round(highwayFraction * 100) : null;
+  const tier = _detourQualityTier(overlap, highwayFraction);
+  const kmLabel = distanceKm != null ? ` (${distanceKm.toFixed(1)}km)` : '';
+  if (tier === 0) {
+    showToast(`Desvio${viaLabel} — <span class="accent">${pct}%</span> diferente${hwPct != null ? `, ${hwPct}% em vias estaduais/federais` : ''}${kmLabel}`);
+  } else if (tier === 1) {
+    showToast(`⚠ Desvio${viaLabel} ${pct}% diferente, mas só <span class="accent">${hwPct}%</span> do trajeto está em vias estaduais/federais`);
+  } else if (tier === 2) {
+    showToast(`⚠ Desvio${viaLabel} majoritariamente em vias estaduais/federais, mas pouco diferente da Rota Original (${pct}%)`);
+  } else {
+    showToast(`⚠ Esse desvio ficou só ${pct}% diferente${hwPct != null ? ` e ${hwPct}% em vias estaduais/federais` : ''} — tente outro ponto`);
+  }
 }
 
 // Whether `candidate` should replace `best`. Tier comes first always. Within
@@ -644,9 +763,11 @@ function _preferFreshVias(candidates) {
 
 // Primary strategy: try routing through each real highway crossing found
 // near green's road (nearest-to-either-end first, capped at
-// HIGHWAY_INTERSECTION_MAX_TRIES), stopping as soon as one both diverges
-// from green AND stays on recognized highways. Returns the best candidate
-// tried (possibly not tier 0), or null if no crossing was found at all.
+// HIGHWAY_INTERSECTION_MAX_TRIES), tried in parallel batches of
+// HIGHWAY_INTERSECTION_BATCH_SIZE rather than one request at a time --
+// stopping as soon as a batch produces something that both diverges from
+// green AND stays on recognized highways. Returns the best candidate tried
+// (possibly not tier 0), or null if no crossing was found at all.
 async function _intersectionDetourSearch(first, last, greenCoords, greenRefs) {
   let crossings;
   try {
@@ -656,19 +777,25 @@ async function _intersectionDetourSearch(first, last, greenCoords, greenRefs) {
     return null;
   }
   if (!crossings.length) return null;
-  const candidates = _preferFreshVias(crossings);
+  const candidates = _preferFreshVias(crossings).slice(0, HIGHWAY_INTERSECTION_MAX_TRIES);
 
   let best = null;
-  for (const crossing of candidates.slice(0, HIGHWAY_INTERSECTION_MAX_TRIES)) {
-    const result = await _fetchOsrmRoute([first, crossing, last]);
-    if (!result) continue;
-    const overlap = _routeOverlapFraction(greenCoords, result.coords, ROUTE_OVERLAP_THRESHOLD_KM);
-    const candidate = {
-      via: crossing, coords: result.coords, distanceKm: result.distanceKm,
-      overlap, highwayFraction: result.highwayFraction
-    };
-    if (_isBetterDetourCandidate(candidate, best)) best = candidate;
-    if (_detourCandidateTier(best) === 0) break;
+  for (let i = 0; i < candidates.length; i += HIGHWAY_INTERSECTION_BATCH_SIZE) {
+    const batch = candidates.slice(i, i + HIGHWAY_INTERSECTION_BATCH_SIZE);
+    const settled = await Promise.all(batch.map(crossing =>
+      _fetchOsrmRoute([first, crossing, last]).then(result => (result ? { crossing, result } : null))
+    ));
+    for (const entry of settled) {
+      if (!entry) continue;
+      const { crossing, result } = entry;
+      const overlap = _routeOverlapFraction(greenCoords, result.coords, ROUTE_OVERLAP_THRESHOLD_KM);
+      const candidate = {
+        via: crossing, coords: result.coords, distanceKm: result.distanceKm,
+        overlap, highwayFraction: result.highwayFraction
+      };
+      if (_isBetterDetourCandidate(candidate, best)) best = candidate;
+    }
+    if (best && _detourCandidateTier(best) === 0) break;
   }
   return best;
 }
@@ -679,9 +806,9 @@ async function _intersectionDetourSearch(first, last, greenCoords, greenRefs) {
 // both sides, actually forcing the road network to be searched elsewhere.
 async function _offsetDetourSearch(first, last, greenCoords) {
   const straightKm = _haversineKm(first.lat, first.lng, last.lat, last.lng);
-  const offsetFractions = [0.25, 0.45, 0.7, 1.0];
+  const offsetFractions = [0.3, 0.6, 1.0];
 
-  // Monta os 8 pontos candidatos (4 distâncias x 2 lados) antes de tentar
+  // Monta os 6 pontos candidatos (3 distâncias x 2 lados) antes de tentar
   // qualquer um, para poder preferir os que ainda não foram sugeridos
   // nesta sessão (ver _detourHistory).
   const allVias = [];
@@ -692,10 +819,11 @@ async function _offsetDetourSearch(first, last, greenCoords) {
   const candidates = _preferFreshVias(allVias);
 
   let best = null;
-  // Dois de cada vez (mesma ideia de antes: os dois lados de uma mesma
-  // distância) em paralelo, em vez de um por um em série.
-  for (let i = 0; i < candidates.length; i += 2) {
-    const batch = candidates.slice(i, i + 2);
+  // Três de cada vez em paralelo, em vez de um por um em série -- reduz o
+  // pior caso de 6 chamadas sequenciais para 2 rodadas.
+  const BATCH_SIZE = 3;
+  for (let i = 0; i < candidates.length; i += BATCH_SIZE) {
+    const batch = candidates.slice(i, i + BATCH_SIZE);
     const settled = await Promise.all(batch.map(via =>
       _fetchOsrmRoute([first, via, last]).then(result => (result ? { via, result } : null))
     ));
@@ -716,6 +844,8 @@ async function _offsetDetourSearch(first, last, greenCoords) {
   return best;
 }
 
+let _viaPickingCleanup = null;
+
 window.useGreenRoutePoints = async function() {
   const src = ROUTES.b; // green / Rota Original
   const dst = ROUTES.a; // red   / Rota Alternativa
@@ -729,6 +859,7 @@ window.useGreenRoutePoints = async function() {
     return;
   }
   if (_routePickingKey) window.toggleRoutePicking(_routePickingKey);
+  if (_viaPickingCleanup) _viaPickingCleanup();
 
   const first = src.waypoints[0];
   const last  = src.waypoints[src.waypoints.length - 1];
@@ -774,6 +905,11 @@ window.useGreenRoutePoints = async function() {
   // uma diferente (ver _detourHistory acima).
   _detourHistory.vias.push({ lat: best.via.lat, lng: best.via.lng });
 
+  // O toast final abaixo já mostra os números calculados durante a busca --
+  // sem isso, o check genérico (routesfound -> _scheduleDetourQualityCheck)
+  // dispararia de novo segundos depois com uma nova consulta OSRM e
+  // repetiria basicamente a mesma mensagem.
+  _suppressDetourQualityOnce = true;
   dst.waypoints = [
     { lat: first.lat, lng: first.lng },
     { lat: best.via.lat, lng: best.via.lng },
@@ -782,19 +918,73 @@ window.useGreenRoutePoints = async function() {
   _rebuildRouteControl('a');
   _renderRouteStops('a');
 
-  const pct = Math.round((1 - best.overlap) * 100);
-  const hwPct = best.highwayFraction != null ? Math.round(best.highwayFraction * 100) : null;
-  const tier = _detourCandidateTier(best);
   const viaLabel = usedFallback ? '' : ' via interseção com outra rodovia';
-  if (tier === 0) {
-    showToast(`Desvio encontrado${viaLabel} — <span class="accent">${pct}%</span> diferente${hwPct != null ? `, ${hwPct}% em vias estaduais/federais` : ''} (${best.distanceKm.toFixed(1)}km)`);
-  } else if (tier === 1) {
-    showToast(`⚠ Desvio${viaLabel} ${pct}% diferente, mas só <span class="accent">${hwPct}%</span> do trajeto está em vias estaduais/federais`);
-  } else if (tier === 2) {
-    showToast(`⚠ Desvio${viaLabel} majoritariamente em vias estaduais/federais, mas pouco diferente da Rota Original (${pct}%)`);
-  } else {
-    showToast('⚠ Nenhum desvio ideal encontrado — usando o mais próximo disponível');
+  _showDetourQualityToast({ overlap: best.overlap, highwayFraction: best.highwayFraction, distanceKm: best.distanceKm, viaLabel });
+};
+
+// "📍 Escolher no mapa" -- manual counterpart to the automatic search above.
+// Copies the SAME start/end points from the Rota Original (so the two
+// routes stay comparable), then arms a single-click picking mode: the next
+// map click becomes the via point, and whatever route that produces is
+// reported with the same overlap%/highway% message the automatic search
+// uses (via the debounced check wired into routesfound -- see
+// _runDetourQualityCheck). Useful when the automatic heuristic keeps
+// missing a detour the person already knows exists (a road they know is
+// open, a bridge out, etc.) -- letting them just point at it directly
+// skips the guesswork entirely.
+window.pickAlternateRouteVia = function() {
+  const src = ROUTES.b; // green / Rota Original
+  const dst = ROUTES.a; // red   / Rota Alternativa
+  if (!src.waypoints || src.waypoints.length < 2) {
+    showToast('Defina ao menos o início e o fim da Rota Original (verde) primeiro');
+    return;
   }
+  if (!src.roadCoords || src.roadCoords.length < 2) {
+    showToast('Aguarde a Rota Original terminar de calcular antes de escolher um desvio');
+    return;
+  }
+  // Don't collide with any other picking mode already in the app, same as
+  // toggleRoutePicking does.
+  if (_routePickingKey) window.toggleRoutePicking(_routePickingKey);
+  if (typeof _pontoPickingHandler !== 'undefined' && _pontoPickingHandler) window.togglePontoPicking();
+  if (typeof _pickingForId !== 'undefined' && _pickingForId) cancelRelocateMode();
+  if (_viaPickingCleanup) _viaPickingCleanup();
+
+  const first = src.waypoints[0];
+  const last  = src.waypoints[src.waypoints.length - 1];
+
+  const btn = document.getElementById('btnRoutePickVia');
+  const banner = document.getElementById('pickingBanner');
+  if (btn) { btn.classList.add('active'); btn.textContent = '✕ Cancelar'; }
+  if (banner) {
+    banner.textContent = '📍 Clique no mapa por onde a Rota Alternativa deve desviar · ESC para cancelar';
+    banner.classList.add('show');
+  }
+  map.getContainer().style.cursor = 'crosshair';
+
+  const onClick = e => {
+    cleanup();
+    dst.waypoints = [
+      { lat: first.lat, lng: first.lng },
+      { lat: e.latlng.lat, lng: e.latlng.lng },
+      { lat: last.lat, lng: last.lng }
+    ];
+    _rebuildRouteControl('a');
+    _renderRouteStops('a');
+    showToast('Calculando o desvio escolhido…');
+  };
+  const onKeydown = e => { if (e.key === 'Escape') { cleanup(); showToast('Seleção de desvio cancelada'); } };
+  function cleanup() {
+    map.off('click', onClick);
+    document.removeEventListener('keydown', onKeydown);
+    map.getContainer().style.cursor = '';
+    if (btn) { btn.classList.remove('active'); btn.textContent = '📍 Desvio (eu escolho o ponto)'; }
+    if (banner) banner.classList.remove('show');
+    _viaPickingCleanup = null;
+  }
+  _viaPickingCleanup = cleanup;
+  map.on('click', onClick);
+  document.addEventListener('keydown', onKeydown);
 };
 
 // ─── SIDEBAR STOP LIST ──────────────────────────────────────────────────────────
@@ -937,6 +1127,7 @@ window.toggleRoutePicking = function(key) {
   // Don't collide with other picking modes already in the app
   if (typeof _pontoPickingHandler !== 'undefined' && _pontoPickingHandler) window.togglePontoPicking();
   if (typeof _pickingForId !== 'undefined' && _pickingForId) cancelRelocateMode();
+  if (_viaPickingCleanup) _viaPickingCleanup();
 
   // Start picking for this route
   _routePickingKey = key;
@@ -1039,6 +1230,26 @@ const ROUTE_IMAGE_WIDTH = 2000;
 const ROUTE_IMAGE_HEIGHT = 1250; // ~16:10, matching the reference export's proportions
 const ROUTE_IMAGE_PADDING_FRACTION = 0.12; // breathing room around the routes/marker
 const ESRI_WORLD_IMAGERY_EXPORT_URL = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export';
+// "Hybrid" reference overlays (transparent PNG, roads+labels / place names)
+// drawn on top of the satellite base -- the Esri layers behind the
+// standard "Imagery Hybrid" basemap style. Re-added as the PRIMARY source
+// for road/city labeling (not just a fallback) because, in practice, the
+// Overpass mirrors this app can otherwise reach turned out to be
+// unreachable or too slow for this person's network -- Esri's
+// server.arcgisonline.com is the same host the satellite base image
+// already comes from, which is known-reachable here. The known trade-off
+// still applies and can't be fixed from this end: these are cached,
+// pre-rendered map tiles, so their baked-in label text is sized for
+// whatever real-world scale the bbox works out to -- a route spanning
+// 100km+ means small text, the same as it would on Google's or anyone
+// else's hybrid basemap zoomed out that far. dpi is requested higher than
+// the service default anyway since it doesn't hurt, but a cached service
+// doesn't actually re-render text bigger for it the way a live one would.
+// The Overpass-based custom labels (fixed pixel size, unaffected by
+// scale) are still tried too and drawn on top when they succeed -- they
+// just can't be relied on as the only source anymore.
+const ESRI_TRANSPORTATION_EXPORT_URL = 'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/export';
+const ESRI_BOUNDARIES_PLACES_EXPORT_URL = 'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/export';
 // Road tracing + labels (BR-xxx, RR-xxx...) are drawn ourselves from OSM
 // data (via Overpass) instead of using Esri's Reference/World_Transportation
 // raster overlay: that overlay is a pre-rendered cartographic layer whose
@@ -1051,8 +1262,8 @@ const ESRI_WORLD_IMAGERY_EXPORT_URL = 'https://server.arcgisonline.com/ArcGIS/re
 // regardless of how much real-world distance the frame covers -- the same
 // "same size at any zoom" property already true of the app's own map.
 const OVERPASS_ROAD_LABEL_ENDPOINTS = [
-  'https://overpass-api.de/api/interpreter',
-  'https://overpass.kumi.systems/api/interpreter'
+  'https://overpass.kumi.systems/api/interpreter',
+  'https://overpass-api.de/api/interpreter'
 ];
 const ROAD_LABEL_MIN_SPACING_PX = 260; // per ref, so a long highway gets repeated labels, not a cluster
 
@@ -1076,41 +1287,81 @@ function _mercatorXToLng(x) {
   return x / R * 180 / Math.PI;
 }
 
-// Fetches OSM ways carrying a route-number ref inside the given (Mercator)
-// bbox -- the raw material for drawing our own road tracing + labels.
-// No highway-class restriction here anymore (motorway/primary/secondary
-// only ended up excluding real state highways that OSM happens to tag as
-// tertiary/unclassified in this region) -- classification turned out to be
-// an unreliable way to tell "federal/state" from "municipal/vicinal"
-// apart. The actual filter is proximity to the routes themselves, applied
-// afterward in _filterRoadWaysNearRoute(): a road is only federal/state
-// *and relevant* here if the trip's own route actually runs along it.
-// Tries a second Overpass mirror if the first one fails/times out.
-async function _fetchRoadRefWaysInBBox(bbox) {
-  const south = _mercatorYToLat(bbox.ymin);
-  const north = _mercatorYToLat(bbox.ymax);
-  const west = _mercatorXToLng(bbox.xmin);
-  const east = _mercatorXToLng(bbox.xmax);
-  const query = `[out:json][timeout:25];way(${south},${west},${north},${east})[highway][ref];out tags geom;`;
+// Timeout for the Overpass city-lookup fetch (see below) -- Overpass is a
+// best-effort supplement now that cities primarily come from the local
+// IBGE dataset, so this stays short rather than waiting a long time for a
+// mirror that may not even be reachable.
+const OVERPASS_BBOX_TIMEOUT_MS = 7000;
+const ROUTE_IMAGE_CORRIDOR_SAMPLES = 8; // how many points along the route get their own around: clause
+const ROUTE_IMAGE_CITY_RADIUS_M = 30000; // cities are sparser and often sit a bit off the highway itself
+const ROUTE_IMAGE_CITY_MAX_LABELS = 16;         // caps how many city labels a wide frame can end up with
+const ROUTE_IMAGE_CITY_SAMPLES = 40; // higher-resolution than ROUTE_IMAGE_CORRIDOR_SAMPLES since the local IBGE lookup is free (no network round trip per sample) -- more samples means fewer gaps along a long route where a nearby município could otherwise be missed
 
-  let lastErr = null;
-  for (const endpoint of OVERPASS_ROAD_LABEL_ENDPOINTS) {
-    try {
-      const res = await fetch(`${endpoint}?data=${encodeURIComponent(query)}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      const ways = data.elements || [];
-      // Keep only refs that actually look like a Brazilian federal/state
-      // route number (e.g. "BR-174", "RR-203") -- filters out things like
-      // a local road's own name or a cycle-route ref sharing the `ref` tag.
-      return ways.filter(w => w.tags && /^[A-Z]{2,3}-?\s?\d/.test(String(w.tags.ref || '').trim()));
-    } catch (err) {
-      lastErr = err;
-      console.warn(`Overpass road lookup failed (${endpoint}):`, err);
-    }
-  }
-  throw lastErr || new Error('Todos os espelhos do Overpass falharam');
+// Evenly-spaced subset of a route's coordinate list, so a corridor query
+// stays a fixed, small size no matter how many points the OSRM polyline
+// actually has.
+function _sampleRoutePoints(routePts, maxPoints) {
+  if (routePts.length <= maxPoints) return routePts;
+  const step = (routePts.length - 1) / (maxPoints - 1);
+  const out = [];
+  for (let i = 0; i < maxPoints; i++) out.push(routePts[Math.round(i * step)]);
+  return out;
 }
+
+// Fetches settlements (city/town only -- see _pickCitiesForImage for why
+// villages are excluded) near the route -- a narrow corridor around a
+// sampling of the route's own points, not a bounding rectangle over the
+// whole route extent (which reliably timed out server-side on a long
+// route).
+async function _fetchCitiesNearRoute(routePts) {
+  const samples = _sampleRoutePoints(routePts, ROUTE_IMAGE_CORRIDOR_SAMPLES);
+  const clauses = samples.map(p => `node(around:${ROUTE_IMAGE_CITY_RADIUS_M},${p.lat},${p.lng})["place"~"^(city|town)$"];`).join('');
+  const query = `[out:json][timeout:25];(${clauses});out body;`;
+
+  for (const endpoint of OVERPASS_ROAD_LABEL_ENDPOINTS) {
+    const data = await _fetchJsonResilient(`${endpoint}?data=${encodeURIComponent(query)}`, { timeoutMs: OVERPASS_BBOX_TIMEOUT_MS, retries: 0 });
+    if (data) return data.elements || [];
+  }
+  throw new Error('Todos os espelhos do Overpass falharam');
+}
+
+// Narrows the combined city hits down to what's actually worth labeling on
+// the image: named places only, duplicates collapsed (the local IBGE list
+// and Overpass can both return the same city), capitals ranked first,
+// capped at ROUTE_IMAGE_CITY_MAX_LABELS so a wide/rural frame doesn't end
+// up wall to wall with labels. Expects already-normalized entries --
+// {name, lat, lon, isCapital} -- from _normalizeCityEntry below, not raw
+// Overpass/IBGE shapes directly.
+function _pickCitiesForImage(entries) {
+  const named = entries.filter(c => c.name && c.lat != null && c.lon != null);
+
+  const deduped = [];
+  named.forEach(c => {
+    const dup = deduped.find(d => d.name === c.name || _haversineKm(d.lat, d.lon, c.lat, c.lon) < 2);
+    if (!dup) { deduped.push(c); return; }
+    if (c.isCapital && !dup.isCapital) Object.assign(dup, c);
+  });
+
+  deduped.sort((a, b) => (b.isCapital ? 1 : 0) - (a.isCapital ? 1 : 0));
+  return deduped.slice(0, ROUTE_IMAGE_CITY_MAX_LABELS);
+}
+
+// Common shape for both city sources: the local IBGE dataset (always
+// available, see 21-municipios-br.js) and, best-effort, Overpass (only
+// when reachable -- see _fetchCitiesNearRoute above). The IBGE list is
+// the reliable one and doesn't depend on any network request at all;
+// Overpass is merged in on top mainly in case it has a settlement IBGE's
+// official municipality list wouldn't (a named locality that isn't its
+// own município), not because it's more trustworthy.
+function _normalizeCityEntry(c) {
+  if (c.tags) { // raw Overpass node
+    if (!c.tags.name) return null;
+    if (typeof CIDADE_NAME_EXCLUDE_RE !== 'undefined' && CIDADE_NAME_EXCLUDE_RE.test(c.tags.name)) return null;
+    return { name: c.tags.name, lat: c.lat, lon: c.lon, isCapital: false, uf: null };
+  }
+  return { name: c.name, lat: c.lat, lon: c.lng, isCapital: !!c.isCapital, uf: c.uf || null }; // from _municipiosBrNear
+}
+
 
 const ROAD_NEAR_ROUTE_THRESHOLD_KM = 0.1; // ~100m -- generous enough for OSM/OSRM alignment slack, tight enough to exclude a parallel road
 const ROAD_NEAR_ROUTE_GRID_CELL_DEG = 0.001; // ~110m cells -- close to the threshold itself
@@ -1167,23 +1418,6 @@ function _extractNearRouteSegments(way, grid, radiusKm = ROAD_NEAR_ROUTE_THRESHO
   return segments.filter(seg => seg.length >= 2);
 }
 
-// Replaces every way with just its near-route segments (see above), and
-// drops ways left with none -- the real "federal/state, not
-// municipal/vicinal" filter: if the trip's own route (which already
-// follows the real road network) runs along a given road, that road is
-// relevant regardless of how OSM happens to classify it. Returns
-// {tags, segments} pairs ready for drawing, not raw OSM ways.
-function _filterRoadWaysNearRoute(ways, routePts) {
-  if (!routePts.length) return [];
-  const grid = _buildRouteProximityGrid(routePts);
-  const result = [];
-  ways.forEach(way => {
-    const segments = _extractNearRouteSegments(way, grid);
-    if (segments.length) result.push({ tags: way.tags, segments });
-  });
-  return result;
-}
-
 // Bounding box (in EPSG:3857 metres) that fits every given {lat,lng} point,
 // padded, then stretched to the export's aspect ratio so the satellite
 // image isn't distorted.
@@ -1220,6 +1454,33 @@ function _computeMercatorBBoxForImage(points) {
   return { xmin, ymin, xmax, ymax };
 }
 
+// Same aspect-ratio-fitting step as above, but starting from the live
+// map's current bounds (post fitBounds) instead of computing padding from
+// the raw route points independently -- see the call site in
+// exportRoutesImage for why.
+function _computeMercatorBBoxFromBounds(bounds) {
+  const sw = bounds.getSouthWest(), ne = bounds.getNorthEast();
+  const m1 = _lngLatToMercatorXY(sw.lng, sw.lat);
+  const m2 = _lngLatToMercatorXY(ne.lng, ne.lat);
+  let xmin = Math.min(m1.x, m2.x), xmax = Math.max(m1.x, m2.x);
+  let ymin = Math.min(m1.y, m2.y), ymax = Math.max(m1.y, m2.y);
+
+  const targetRatio = ROUTE_IMAGE_WIDTH / ROUTE_IMAGE_HEIGHT;
+  const curRatio = (xmax - xmin) / (ymax - ymin);
+  if (curRatio > targetRatio) {
+    const newH = (xmax - xmin) / targetRatio;
+    const cy = (ymin + ymax) / 2;
+    ymin = cy - newH / 2; ymax = cy + newH / 2;
+  } else {
+    const newW = (ymax - ymin) * targetRatio;
+    const cx = (xmin + xmax) / 2;
+    xmin = cx - newW / 2; xmax = cx + newW / 2;
+  }
+  return { xmin, ymin, xmax, ymax };
+}
+
+const ESRI_IMAGE_TIMEOUT_MS = 20000; // satellite/reference images are a bigger payload than a JSON query -- needs more room than the Overpass timeout below
+
 async function _fetchEsriMapImage(serviceUrl, bbox, width, height, extraParams) {
   const params = new URLSearchParams(Object.assign({
     bbox: `${bbox.xmin},${bbox.ymin},${bbox.xmax},${bbox.ymax}`,
@@ -1229,7 +1490,31 @@ async function _fetchEsriMapImage(serviceUrl, bbox, width, height, extraParams) 
     format: 'jpg',
     f: 'image'
   }, extraParams || {}));
-  const res = await fetch(`${serviceUrl}?${params.toString()}`);
+
+  // Same reasoning as the Overpass calls above: a bare fetch() never times
+  // out on its own, and this is the one call in the whole export with no
+  // fallback (no satellite image, no photo at all) -- so if it hangs, the
+  // button used to just sit on "GERANDO IMAGEM…" forever with no error.
+  // One retry, since a dropped connection on a single large image request
+  // is common enough to be worth one more try before giving up.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ESRI_IMAGE_TIMEOUT_MS);
+  let res;
+  try {
+    res = await fetch(`${serviceUrl}?${params.toString()}`, { signal: controller.signal });
+  } catch (err) {
+    clearTimeout(timer);
+    console.warn('Esri image fetch failed, retrying once:', err);
+    const controller2 = new AbortController();
+    const timer2 = setTimeout(() => controller2.abort(), ESRI_IMAGE_TIMEOUT_MS);
+    try {
+      res = await fetch(`${serviceUrl}?${params.toString()}`, { signal: controller2.signal });
+    } finally {
+      clearTimeout(timer2);
+    }
+  } finally {
+    clearTimeout(timer);
+  }
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const blob = await res.blob();
   const objUrl = URL.createObjectURL(blob);
@@ -1293,12 +1578,44 @@ function _drawPinMarker(ctx, x, y, colorHex) {
   ctx.restore();
 }
 
-function _drawRouteImageLabel(ctx, x, y, text) {
+// Shared overlap-avoidance for every text label drawn on the exported
+// image (LD_INICIO, city names, highway shields): a running list of
+// already-placed label boxes. A new label whose box would overlap one
+// already placed gets nudged in ever-wider rings until it lands clear (or,
+// failing that after a bounded number of tries, just placed where asked --
+// better than an infinite loop on a very crowded frame). Returns the
+// {x, y} to actually draw at.
+function _reserveLabelBox(registry, x, y, w, h) {
+  const overlaps = (bx, by) => registry.some(b =>
+    bx < b.x + b.w && bx + w > b.x && by < b.y + b.h && by + h > b.y
+  );
+  if (!overlaps(x, y)) { registry.push({ x, y, w, h }); return { x, y }; }
+  const step = h + 6;
+  for (let ring = 1; ring <= 10; ring++) {
+    const candidates = [
+      { x, y: y + step * ring }, { x, y: y - step * ring },
+      { x: x + step * ring, y }, { x: x - step * ring, y },
+      { x: x + step * ring, y: y + step * ring }, { x: x - step * ring, y: y + step * ring },
+      { x: x + step * ring, y: y - step * ring }, { x: x - step * ring, y: y - step * ring }
+    ];
+    for (const c of candidates) {
+      if (!overlaps(c.x, c.y)) { registry.push({ x: c.x, y: c.y, w, h }); return c; }
+    }
+  }
+  registry.push({ x, y, w, h });
+  return { x, y };
+}
+
+function _drawRouteImageLabel(ctx, x, y, text, registry) {
   const s = ROUTE_IMAGE_UI_SCALE;
   const fontSize = 13 * s, padX = 6 * s, padY = 3 * s;
   ctx.font = `${fontSize}px sans-serif`;
   const w = ctx.measureText(text).width + padX * 2;
   const h = fontSize + padY * 2;
+  if (registry) {
+    const pos = _reserveLabelBox(registry, x, y - h / 2, w, h);
+    x = pos.x; y = pos.y + h / 2;
+  }
   ctx.fillStyle = 'rgba(255,255,255,0.9)';
   _drawRoundedRect(ctx, x, y - h / 2, w, h, 3 * s);
   ctx.fill();
@@ -1308,17 +1625,58 @@ function _drawRouteImageLabel(ctx, x, y, text) {
   ctx.fillText(text, x + padX, y);
 }
 
+// Small white dot + name pill for a city/town that falls inside the
+// exported frame (see _fetchCitiesInBBox / _pickCitiesForImage above) --
+// visually distinct from the route pins and road shields so it reads as
+// "place on the map", not another stop or highway marker. The dot always
+// stays exactly on the city's real coordinate; only the text pill nudges
+// if it would overlap another label already placed.
+function _drawCityMarker(ctx, x, y, name, registry) {
+  const s = ROUTE_IMAGE_UI_SCALE;
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(x, y, 3.5 * s, 0, Math.PI * 2);
+  ctx.fillStyle = '#ffffff';
+  ctx.fill();
+  ctx.lineWidth = 1.2 * s;
+  ctx.strokeStyle = '#000';
+  ctx.stroke();
+  ctx.restore();
+
+  const fontSize = 13 * s, padX = 6 * s, padY = 3 * s;
+  ctx.font = `600 ${fontSize}px sans-serif`;
+  const w = ctx.measureText(name).width + padX * 2;
+  const h = fontSize + padY * 2;
+  let lx = x + 7 * s, ly = y;
+  if (registry) {
+    const pos = _reserveLabelBox(registry, lx, ly - h / 2, w, h);
+    lx = pos.x; ly = pos.y + h / 2;
+  }
+  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  _drawRoundedRect(ctx, lx, ly - h / 2, w, h, 3 * s);
+  ctx.fill();
+  ctx.fillStyle = '#1a1a1a';
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'left';
+  ctx.fillText(name, lx + padX, ly);
+}
+
 // Highway "shield" pill, e.g. "BR-174" / "RR-203" -- fixed pixel font size
 // (scaled only by ROUTE_IMAGE_UI_SCALE, never by real-world distance), so
 // it stays exactly as legible whether the frame covers 30km or 300km.
 // Centered on (x, y), matching where a road-name pill sits on the road
-// itself in the reference export.
-function _drawRoadRefLabel(ctx, x, y, text) {
+// itself in the reference export -- nudged off-center if it would overlap
+// another label already placed.
+function _drawRoadRefLabel(ctx, x, y, text, registry) {
   const s = ROUTE_IMAGE_UI_SCALE;
   const fontSize = 15 * s, padX = 7 * s, padY = 4 * s;
   ctx.font = `bold ${fontSize}px sans-serif`;
   const w = ctx.measureText(text).width + padX * 2;
   const h = fontSize + padY * 2;
+  if (registry) {
+    const pos = _reserveLabelBox(registry, x - w / 2, y - h / 2, w, h);
+    x = pos.x + w / 2; y = pos.y + h / 2;
+  }
   ctx.fillStyle = 'rgba(255,255,255,0.94)';
   _drawRoundedRect(ctx, x - w / 2, y - h / 2, w, h, 3 * s);
   ctx.fill();
@@ -1329,56 +1687,6 @@ function _drawRoadRefLabel(ctx, x, y, text) {
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(text, x, y);
-}
-
-// Draws each near-route segment's line (thin, pale) -- called before our
-// own route lines so our routes stand out on top of it.
-function _drawRoadRefLines(ctx, roadEntries, project) {
-  const s = ROUTE_IMAGE_UI_SCALE;
-  roadEntries.forEach(entry => {
-    entry.segments.forEach(seg => {
-      if (seg.length < 2) return;
-      ctx.beginPath();
-      seg.forEach((pt, i) => {
-        const [px, py] = project(pt.lat, pt.lon);
-        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-      });
-      ctx.strokeStyle = 'rgba(255,255,255,0.55)';
-      ctx.lineWidth = 2 * s;
-      ctx.lineJoin = 'round';
-      ctx.lineCap = 'round';
-      ctx.stroke();
-    });
-  });
-}
-
-// Draws one shield label per near-route segment (so a long highway made of
-// many such segments gets repeated labels along its length, same as the
-// reference export) -- skipping a label when it would land too close to
-// another already placed for the same ref, so a road split into many tiny
-// segments doesn't cluster labels. Called after our own route lines so
-// labels stay legible even where a route runs right along that road.
-function _drawRoadRefShieldLabels(ctx, roadEntries, project) {
-  const s = ROUTE_IMAGE_UI_SCALE;
-  const placedByRef = {}; // ref -> array of [px, py] already placed
-
-  roadEntries.forEach(entry => {
-    const ref = (entry.tags && entry.tags.ref) ? String(entry.tags.ref).split(';')[0].trim() : null;
-    if (!ref) return;
-
-    entry.segments.forEach(seg => {
-      if (seg.length < 2) return;
-      const mid = seg[Math.floor(seg.length / 2)];
-      const [px, py] = project(mid.lat, mid.lon);
-
-      const placed = placedByRef[ref] || (placedByRef[ref] = []);
-      const tooClose = placed.some(([qx, qy]) => Math.hypot(px - qx, py - qy) < ROAD_LABEL_MIN_SPACING_PX * s);
-      if (tooClose) return;
-
-      placed.push([px, py]);
-      _drawRoadRefLabel(ctx, px, py, ref);
-    });
-  });
 }
 
 // Title block, top-left -- the obra code (reusing the same nameMiddle field
@@ -1553,7 +1861,7 @@ function _drawRouteImageAttribution(ctx, width, height) {
   ctx.fillStyle = 'rgba(255,255,255,0.85)';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'bottom';
-  ctx.fillText('Imagery © Esri, Maxar, Earthstar Geographics · Roads © OpenStreetMap contributors', 10 * s, height - 8 * s);
+  ctx.fillText('Imagery/Reference © Esri, Maxar, Earthstar Geographics, HERE, Garmin · Roads © OpenStreetMap contributors', 10 * s, height - 8 * s);
   ctx.restore();
 }
 
@@ -1582,73 +1890,89 @@ window.exportRoutesImage = async function() {
     const allPoints = routePts.slice();
     LD_INICIO_POINTS.forEach(p => allPoints.push(p));
 
-    const bbox = _computeMercatorBBoxForImage(allPoints);
+    // Center the live map on the routes first -- same fitBounds a person
+    // would do by hand -- then use exactly that resulting view as the
+    // image's frame, instead of an independently-computed crop. This is
+    // as close as this can get to "print what's centered on screen":
+    // the actual pixels still come from Esri's export service below (see
+    // why in the comment on ESRI_WORLD_IMAGERY_EXPORT_URL below), because
+    // a literal screenshot of the live Leaflet map can't be saved to a
+    // file at all when the base layer is Google's satellite/hybrid tiles
+    // -- Google's tile servers don't allow cross-origin canvas reads, so
+    // the browser refuses to export a canvas that ever drew one of those
+    // tiles (a "tainted canvas" security restriction, not a bug in this
+    // app). Esri's export endpoint is the CORS-friendly stand-in for that
+    // same imagery.
+    map.fitBounds(L.latLngBounds(allPoints.map(p => [p.lat, p.lng])), { padding: [60, 60], animate: false });
+    const bbox = _computeMercatorBBoxFromBounds(map.getBounds());
 
-    // Whitelist de códigos de rodovia: exatamente as que alguma das rotas
-    // construídas realmente percorre. Calculado na hora (mesma conta do
-    // campo TRAJETO:) em vez de ler o texto atual desse campo, para não
-    // pegá-lo no meio do "…" (ainda calculando).
-    //
-    // CORREÇÃO: a versão anterior olhava só para a Rota Alternativa (chave
-    // 'a'). Se a pessoa tivesse desenhado apenas a Rota Original (verde,
-    // chave 'b') -- o caso mais comum, já que ela normalmente já vem pronta
-    // ao soltar o KML -- a whitelist ficava vazia e NENHUM rótulo de via
-    // era desenhado na imagem, mesmo com rodovias federais/estaduais
-    // genuinamente no trajeto. Agora soma as rodovias das duas rotas que
-    // existirem.
+    // Whitelist de códigos de rodovia + os pontos onde cada uma começa:
+    // exatamente as que alguma das rotas construídas realmente percorre,
+    // vindo direto do próprio OSRM (mesma chamada que já alimenta o campo
+    // TRAJETO:) -- sem depender de Overpass, DNIT ou qualquer fonte
+    // externa de malha viária. Um trecho sem ref/nome no OSRM simplesmente
+    // não ganha tarja, o que é o resultado correto (nada pra rotular ali).
     const [descA, descB] = await Promise.all([
       (ROUTES.a.waypoints && ROUTES.a.waypoints.length >= 2) ? _fetchRouteDescription(ROUTES.a.waypoints) : Promise.resolve(null),
       (ROUTES.b.waypoints && ROUTES.b.waypoints.length >= 2) ? _fetchRouteDescription(ROUTES.b.waypoints) : Promise.resolve(null)
     ]);
-    const allowedHighwayRefs = new Set([
-      ...((descA && descA.highways) || []),
-      ...((descB && descB.highways) || [])
-    ]);
+    const roadSegments = [
+      ...((descA && descA.segments) || []),
+      ...((descB && descB.segments) || [])
+    ];
+    const roadLookupFailed = !roadSegments.length;
 
     // Base satellite (requested lossless so the only JPEG compression that
     // ever happens is the final canvas.toBlob() below -- avoids the
     // double-recompression quality loss of re-saving an already-JPEG base)
-    // and the OSM road/ref data are independent of each other, so fetch
-    // both at once instead of one after another.
-    const [baseImg, roadWaysRaw] = await Promise.all([
+    // and the cities inside the frame are independent of each other, so
+    // fetch both at once instead of one after another. City lookup is
+    // best-effort: if it fails, the image still generates with just the
+    // satellite + our own routes, and a toast at the end says so (instead
+    // of the image just quietly coming out without them).
+    let cityLookupFailed = false;
+    const [baseImg, transportationImg, placesImg, citiesRaw] = await Promise.all([
       _fetchEsriMapImage(ESRI_WORLD_IMAGERY_EXPORT_URL, bbox, ROUTE_IMAGE_WIDTH, ROUTE_IMAGE_HEIGHT, { format: 'png24' }),
-      _fetchRoadRefWaysInBBox(bbox).catch(err => {
-        console.warn('Overpass road/ref lookup indisponível, seguindo só com satélite + rotas:', err);
+      _fetchEsriMapImage(ESRI_TRANSPORTATION_EXPORT_URL, bbox, ROUTE_IMAGE_WIDTH, ROUTE_IMAGE_HEIGHT, { format: 'png32', transparent: true, dpi: 300 }).catch(err => {
+        console.warn('Esri World_Transportation overlay indisponível:', err);
+        return null;
+      }),
+      _fetchEsriMapImage(ESRI_BOUNDARIES_PLACES_EXPORT_URL, bbox, ROUTE_IMAGE_WIDTH, ROUTE_IMAGE_HEIGHT, { format: 'png32', transparent: true, dpi: 300 }).catch(err => {
+        console.warn('Esri World_Boundaries_and_Places overlay indisponível:', err);
+        return null;
+      }),
+      // Best-effort on top of the local IBGE dataset below -- not the
+      // primary source anymore, so its failure doesn't set
+      // cityLookupFailed (there's always at least the local list).
+      _fetchCitiesNearRoute(routePts).catch(err => {
+        console.warn('Overpass city lookup indisponível, seguindo só com a lista local de municípios:', err);
         return [];
       })
     ]);
-    // First keep only the roads actually part of the alternative route's
-    // trajeto, then (as a safety net) only the portions of those roads
-    // that genuinely run near one of the built routes -- see
-    // _filterRoadWaysNearRoute() for why that second step still matters
-    // (a road can share a ref with an unrelated stretch elsewhere in the
-    // frame).
-    const roadWaysAllowed = allowedHighwayRefs.size
-      ? roadWaysRaw.filter(w => allowedHighwayRefs.has(_extractHighwayCode(w.tags && w.tags.ref)))
+    // Cities: the local IBGE municipality list (see 21-municipios-br.js)
+    // never depends on a network request, so it's the reliable baseline;
+    // Overpass is merged on top when it's reachable, mainly for named
+    // localities that aren't their own município. If neither the local
+    // lookup nor the merge produces anything, THAT'S the one real "city
+    // lookup failed" case worth telling the person about.
+    const citiesLocal = (typeof _municipiosBrNear === 'function')
+      ? _municipiosBrNear(_sampleRoutePoints(routePts, ROUTE_IMAGE_CITY_SAMPLES), ROUTE_IMAGE_CITY_RADIUS_M / 1000)
       : [];
-    const roadWaysOnRoute = _filterRoadWaysNearRoute(roadWaysAllowed, routePts);
-
-    // Além do trajeto em si, toda rodovia FEDERAL (BR-xxx) OU ESTADUAL
-    // (sigla da UF, ex. AL-xxx, PB-xxx, PI-xxx) que aparecer no
-    // enquadramento da imagem também deve ser traçada/rotulada, mesmo que
-    // a rota não passe por ela -- desenhada com a geometria completa (sem
-    // o recorte "perto da rota" acima, já que o objetivo aqui é justamente
-    // mostrá-la fora da rota). Só entram vias (elementos OSM) que ainda
-    // não fazem parte de roadWaysAllowed, para não desenhar/rotular a
-    // mesma via duas vezes.
-    const onRouteWayIds = new Set(roadWaysAllowed.map(w => w.id));
-    const roadWaysOffRoute = roadWaysRaw
-      .filter(w => !onRouteWayIds.has(w.id) && _isFederalOrStateHighwayRef(w.tags && w.tags.ref))
-      .map(w => ({ tags: w.tags, segments: (w.geometry && w.geometry.length >= 2) ? [w.geometry] : [] }))
-      .filter(w => w.segments.length);
-
-    const roadWays = roadWaysOnRoute.concat(roadWaysOffRoute);
+    const citiesForImage = _pickCitiesForImage(
+      citiesLocal.map(_normalizeCityEntry).concat(citiesRaw.map(_normalizeCityEntry)).filter(Boolean)
+    );
+    if (!citiesForImage.length) cityLookupFailed = true;
 
     const canvas = document.createElement('canvas');
     canvas.width = ROUTE_IMAGE_WIDTH;
     canvas.height = ROUTE_IMAGE_HEIGHT;
     const ctx = canvas.getContext('2d');
     ctx.drawImage(baseImg, 0, 0, ROUTE_IMAGE_WIDTH, ROUTE_IMAGE_HEIGHT);
+    // "Hybrid" road overlay (transparent PNG) -- drawn under our own route
+    // lines on purpose, same as the Overpass road tracing further down, so
+    // the route itself still stands out wherever it runs along a road
+    // this layer also draws.
+    if (transportationImg) ctx.drawImage(transportationImg, 0, 0, ROUTE_IMAGE_WIDTH, ROUTE_IMAGE_HEIGHT);
 
     const project = (lat, lng) => {
       const m = _lngLatToMercatorXY(lng, lat);
@@ -1657,10 +1981,6 @@ window.exportRoutesImage = async function() {
         (bbox.ymax - m.y) / (bbox.ymax - bbox.ymin) * ROUTE_IMAGE_HEIGHT
       ];
     };
-
-    // Other roads' tracing (thin, pale) drawn before our own route lines,
-    // so our routes still stand out on top of the general road network.
-    _drawRoadRefLines(ctx, roadWays, project);
 
     // Original (green) drawn first, alternative (red) on top -- matches
     // the layering in the reference export.
@@ -1683,17 +2003,56 @@ window.exportRoutesImage = async function() {
       ctx.shadowBlur = 0;
     });
 
-    // Road shield labels (BR-xxx, RR-xxx...) drawn AFTER the route lines,
-    // fixed pixel size, so they stay legible even where a route runs right
-    // along that road -- matching the reference export's layering.
-    _drawRoadRefShieldLabels(ctx, roadWays, project);
+    // Place-name overlay (city/place labels only) drawn AFTER the route
+    // lines, unlike the road overlay above -- a city name sitting right on
+    // the route is the normal case here, and hiding it under the route
+    // line would defeat the point of showing it at all.
+    if (placesImg) ctx.drawImage(placesImg, 0, 0, ROUTE_IMAGE_WIDTH, ROUTE_IMAGE_HEIGHT);
+
+    // Shared list of already-placed label boxes so highway shields, the
+    // LD_INICIO tag, and city names don't render stacked on top of each
+    // other when two of them would otherwise land in the same spot -- see
+    // _reserveLabelBox. Order matters a little: whichever draws first gets
+    // to keep its spot, later ones nudge around it.
+    const labelRegistry = [];
+
+    // Highway shields (BR-174, RR-342, RR-203...) drawn AFTER the route
+    // lines, directly at the coordinates where the route itself changes
+    // road -- see _highwaySegmentsWithLocations. Deduped by proximity so
+    // both routes sharing the same junction don't stack two identical
+    // shields on top of each other.
+    (function drawRouteHighwayShields() {
+      const s = ROUTE_IMAGE_UI_SCALE;
+      const placedByCode = {}; // code -> [px,py] already placed for THAT code -- different highways must never suppress each other, even at the same junction
+      roadSegments.forEach(seg => {
+        const [px, py] = project(seg.lat, seg.lng);
+        const placed = placedByCode[seg.code] || (placedByCode[seg.code] = []);
+        const tooClose = placed.some(([qx, qy]) => Math.hypot(px - qx, py - qy) < ROAD_LABEL_MIN_SPACING_PX * s);
+        if (tooClose) return;
+        placed.push([px, py]);
+        _drawRoadRefLabel(ctx, px, py, seg.code, labelRegistry);
+      });
+    })();
+
+    // Diagnostic trail for when the highway labels don't show up on the
+    // image: this prints exactly where it came up empty (no refs
+    // recognized in the route's own OSRM steps), instead of leaving that a
+    // mystery.
+    console.log('[ROTA IMG] trechos de rodovia na rota (código + onde começa):', roadSegments.map(s => s.code).join(', ') || '(nenhum)');
+    console.log('[ROTA IMG] municípios (lista local IBGE):', citiesLocal.length,
+      '+ Overpass:', citiesRaw.length, '=', citiesForImage.length, 'no rótulo final');
 
     LD_INICIO_POINTS.forEach(p => {
       const [px, py] = project(p.lat, p.lng);
       _drawPinMarker(ctx, px, py, LD_INICIO_COLOR);
       // O deslocamento do rótulo era em pixels fixos, então em outros
       // tamanhos de saída ele descolava do alfinete.
-      _drawRouteImageLabel(ctx, px + 14 * ROUTE_IMAGE_UI_SCALE, py - 11 * ROUTE_IMAGE_UI_SCALE, 'LD_INICIO_OAE');
+      _drawRouteImageLabel(ctx, px + 14 * ROUTE_IMAGE_UI_SCALE, py - 11 * ROUTE_IMAGE_UI_SCALE, 'LD_INICIO_OAE', labelRegistry);
+    });
+
+    citiesForImage.forEach(c => {
+      const [px, py] = project(c.lat, c.lon);
+      _drawCityMarker(ctx, px, py, c.uf ? `${c.name} - ${c.uf}` : c.name, labelRegistry);
     });
 
     const code = (ROUTES.a.nameMiddle || ROUTES.b.nameMiddle || '').trim();
@@ -1708,12 +2067,17 @@ window.exportRoutesImage = async function() {
       const safeCode = code.replace(/[\\/:*?"<>|]/g, '_');
       const fileName = safeCode ? `ROTA_ALTERNATIVA_${safeCode}.jpg` : 'ROTA_ALTERNATIVA.jpg';
       triggerDownload(blob, fileName);
-      const warning = !allowedHighwayRefs.size ? ' (nenhuma rodovia identificada no trajeto -- imagem sem rótulos de via)' : '';
+      const warnings = [];
+      if (roadLookupFailed) warnings.push('nenhuma rodovia identificada no trajeto -- imagem sem rótulos de via');
+      else warnings.push(`${roadSegments.length} rodovia(s) marcada(s)`);
+      if (cityLookupFailed) warnings.push('nenhum município encontrado perto da rota');
+      else warnings.push(`${citiesForImage.length} cidades marcadas`);
+      const warning = warnings.length ? ` (${warnings.join('; ')})` : '';
       showToast(`⬇ Imagem <span class="accent">${fileName}</span> gerada${warning}`);
     }, 'image/jpeg', 0.95);
   } catch (err) {
     console.error('Falha ao gerar imagem da rota:', err);
-    showToast('⚠ Não foi possível gerar a imagem — falha ao obter a imagem de satélite (verifique a conexão)');
+    showToast(`⚠ Não foi possível gerar a imagem — ${err && err.message ? err.message : 'erro desconhecido'} (veja o console para detalhes)`);
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = originalLabel; }
   }

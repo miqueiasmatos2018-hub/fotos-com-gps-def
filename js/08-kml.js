@@ -68,13 +68,18 @@ function getTodayDnitDateParam() {
 
 // DNIT's localizarkm endpoint responds with an array like:
 // [{ id, br, sg_tp_trecho, uf, versao, id_trecho, km: "259.34227822364312", lat, lng }]
+// Truncated (not rounded) to 2 decimals -- same reasoning as LAT/LONG in
+// 16-medidas.js: rounding the last decimal can shift the value by enough
+// to matter when pasting into the cadastro. Reuses _truncDecimals from
+// that file (loaded after this one, but only called later at runtime,
+// once every script has already run).
 function extractDnitKm(data) {
   const rec = Array.isArray(data) ? data[0] : data;
   if (!rec || typeof rec !== 'object') return null;
   const raw = rec.km ?? rec.Km ?? rec.KM;
   if (raw == null || raw === '') return null;
   const num = parseFloat(raw);
-  return Number.isFinite(num) ? num.toFixed(2) : raw;
+  return Number.isFinite(num) ? _truncDecimals(num, 2) : raw;
 }
 
 // Replace the "consultando…" placeholder in a marker's popup with the real value.

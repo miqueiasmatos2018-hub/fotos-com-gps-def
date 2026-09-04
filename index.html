@@ -12,7 +12,7 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.css"/>
-<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="styles.css?v=17">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js" defer></script>
 <script src="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.js" defer></script>
@@ -297,6 +297,8 @@
         </div>
         <button class="route-from-green-btn" id="btnRouteFromGreen" onclick="useGreenRoutePoints()"
           title="Usa só o início e o fim da Rota Original (verde) e sugere um caminho por outra rodovia, a partir da interseção real mais próxima — útil como desvio caso a via original esteja bloqueada">🟢→🔴 Desvio (início/fim da Rota Original)</button>
+        <button class="route-from-green-btn route-from-green-btn-manual" id="btnRoutePickVia" onclick="pickAlternateRouteVia()"
+          title="Usa o início e o fim da Rota Original (verde), mas deixa você clicar no mapa por onde o desvio deve passar, em vez de o app tentar adivinhar">📍 Desvio (eu escolho o ponto)</button>
         <div class="route-stops-empty" id="routeStopsEmptyA">Nenhuma parada adicionada</div>
         <div class="route-stops-list" id="routeStopsListA"></div>
         <div class="route-alternatives" id="routeAlternativesA" style="display:none"></div>
@@ -744,26 +746,27 @@
      LOAD ORDER MATTERS. The files are numbered; keep them in this order.
      Concatenating them in this order reproduces the original program.
      =========================================================================== -->
-<script src="js/00-core.js" defer></script>
-<script src="js/01-map-core.js" defer></script>
-<script src="js/02-orientation-layers.js" defer></script>
-<script src="js/03-state.js" defer></script>
-<script src="js/04-photos.js" defer></script>
-<script src="js/05-photo-markers.js" defer></script>
-<script src="js/06-export.js" defer></script>
-<script src="js/07-map-ui.js" defer></script>
-<script src="js/08-kml.js" defer></script>
-<script src="js/09-tabs-bulk.js" defer></script>
-<script src="js/10-interactions.js" defer></script>
-<script src="js/11-photo-fixes.js" defer></script>
-<script src="js/12-search-pontos.js" defer></script>
-<script src="js/13-sorting.js" defer></script>
-<script src="js/14-tools.js" defer></script>
-<script src="js/15-routes.js" defer></script>
-<script src="js/16-medidas.js" defer></script>
-<script src="js/17-elementos.js" defer></script>
-<script src="js/18-nomes.js" defer></script>
-<script src="js/19-boot.js" defer></script>
-<script src="js/20-fotos-superiores.js" defer></script>
+<script src="js/00-core.js?v=17" defer></script>
+<script src="js/01-map-core.js?v=17" defer></script>
+<script src="js/02-orientation-layers.js?v=17" defer></script>
+<script src="js/03-state.js?v=17" defer></script>
+<script src="js/04-photos.js?v=17" defer></script>
+<script src="js/05-photo-markers.js?v=17" defer></script>
+<script src="js/06-export.js?v=17" defer></script>
+<script src="js/07-map-ui.js?v=17" defer></script>
+<script src="js/08-kml.js?v=17" defer></script>
+<script src="js/09-tabs-bulk.js?v=17" defer></script>
+<script src="js/10-interactions.js?v=17" defer></script>
+<script src="js/11-photo-fixes.js?v=17" defer></script>
+<script src="js/12-search-pontos.js?v=17" defer></script>
+<script src="js/13-sorting.js?v=17" defer></script>
+<script src="js/14-tools.js?v=17" defer></script>
+<script src="js/15-routes.js?v=17" defer></script>
+<script src="js/16-medidas.js?v=17" defer></script>
+<script src="js/17-elementos.js?v=17" defer></script>
+<script src="js/18-nomes.js?v=17" defer></script>
+<script src="js/19-boot.js?v=17" defer></script>
+<script src="js/20-fotos-superiores.js?v=17" defer></script>
+<script src="js/21-municipios-br.js?v=17" defer></script>
 </body>
 </html>

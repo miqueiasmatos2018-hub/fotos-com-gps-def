@@ -12,7 +12,7 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.css"/>
-<link rel="stylesheet" href="styles.css?v=22">
+<link rel="stylesheet" href="styles.css?v=26">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js" defer></script>
 <script src="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.js" defer></script>
@@ -65,6 +65,7 @@
     <button class="top-tab-btn" id="tabMedidas" onclick="switchTab('medidas')"><span class="top-tab-icon">📏</span>Dados</button>
     <button class="top-tab-btn" id="tabElementos" onclick="switchTab('elementos')"><span class="top-tab-icon">🧱</span>Elementos</button>
     <button class="top-tab-btn" id="tabNomes" onclick="switchTab('nomes')"><span class="top-tab-icon">🏷</span>Nomes</button>
+    <button class="top-tab-btn" id="tabGpx" onclick="switchTab('gpx')"><span class="top-tab-icon">🛰</span>GPX</button>
   </nav>
   <div class="header-right">
     <div class="header-tab-anim" id="headerTabAnim" aria-hidden="true">
@@ -533,6 +534,57 @@
       </div>
     </div>
 
+    <div class="tab-content" id="tabContentGpx">
+      <p style="font-size:10.5px;color:var(--text2);margin:0 0 10px;">
+        Geocodifica fotos usando um trajeto GPX: casa o horário de cada foto
+        com o ponto do GPX mais próximo no tempo e grava a coordenada (e
+        altitude, se o GPX tiver) direto no EXIF.
+      </p>
+
+      <div class="elem-dropzone elem-compact" id="gpxDropPhotos">
+        <div class="elem-dz-left">
+          <div class="elem-dz-icon">📷</div>
+          <div class="elem-dz-text">
+            <b>Arraste as fotos aqui</b>
+            <span id="gpxPhotosCount">Nenhuma foto ainda</span>
+          </div>
+        </div>
+        <div class="elem-dz-buttons">
+          <button class="elem-btn primary" id="gpxBtnChoosePhotos" type="button">Escolher fotos</button>
+        </div>
+        <input type="file" id="gpxPhotosInput" accept="image/*" multiple style="display:none">
+      </div>
+
+      <div class="elem-dropzone elem-compact" id="gpxDropTrack" style="margin-top:8px;">
+        <div class="elem-dz-left">
+          <div class="elem-dz-icon">🛰</div>
+          <div class="elem-dz-text">
+            <b>Arraste o arquivo .gpx aqui</b>
+            <span id="gpxTrackLabel">Nenhum trajeto ainda</span>
+          </div>
+        </div>
+        <div class="elem-dz-buttons">
+          <button class="elem-btn primary" id="gpxBtnChooseTrack" type="button">Escolher .gpx</button>
+        </div>
+        <input type="file" id="gpxTrackInput" accept=".gpx" style="display:none">
+      </div>
+
+      <div class="gpx-offset-row">
+        <label for="gpxOffsetInput">Fuso do relógio da câmera (horas, relativo ao UTC)</label>
+        <input type="number" id="gpxOffsetInput" value="-3" step="0.5" min="-14" max="14">
+      </div>
+      <p class="gpx-offset-hint">O GPX grava os horários em UTC; a câmera grava no horário local do fuso onde foi ajustada — se as fotos caírem no lugar errado do trajeto, ajuste esse número.</p>
+
+      <button class="elem-btn primary" id="gpxProcessBtn" type="button" style="width:100%;" disabled>📍 Processar</button>
+
+      <div id="gpxResults"></div>
+
+      <div class="gpx-download-bar" id="gpxDownloadBar" style="display:none;">
+        <button class="elem-btn primary" id="gpxDownloadBtn" type="button" style="width:100%;">⬇ BAIXAR FOTOS COM GPS</button>
+        <button class="elem-btn" id="gpxClearBtn" type="button" style="width:100%;margin-top:6px;">✕ Limpar</button>
+      </div>
+    </div>
+
     <div class="export-bar" id="exportBar">
       <button class="btn-export-single" id="exportSelectedBtn" onclick="exportSelectedPhotos()" style="display:none;" title="Baixar as fotos marcadas com a caixinha">⬇ BAIXAR SELECIONADAS (<span id="selectedPhotosCount">0</span>)</button>
       <button class="btn-export" id="exportAllBtn" onclick="exportAllSmart()">⬇ EXPORTAR TUDO</button>
@@ -754,27 +806,28 @@
      LOAD ORDER MATTERS. The files are numbered; keep them in this order.
      Concatenating them in this order reproduces the original program.
      =========================================================================== -->
-<script src="js/00-core.js?v=22" defer></script>
-<script src="js/01-map-core.js?v=22" defer></script>
-<script src="js/02-orientation-layers.js?v=22" defer></script>
-<script src="js/03-state.js?v=22" defer></script>
-<script src="js/04-photos.js?v=22" defer></script>
-<script src="js/05-photo-markers.js?v=22" defer></script>
-<script src="js/06-export.js?v=22" defer></script>
-<script src="js/07-map-ui.js?v=22" defer></script>
-<script src="js/08-kml.js?v=22" defer></script>
-<script src="js/09-tabs-bulk.js?v=22" defer></script>
-<script src="js/10-interactions.js?v=22" defer></script>
-<script src="js/11-photo-fixes.js?v=22" defer></script>
-<script src="js/12-search-pontos.js?v=22" defer></script>
-<script src="js/13-sorting.js?v=22" defer></script>
-<script src="js/14-tools.js?v=22" defer></script>
-<script src="js/15-routes.js?v=22" defer></script>
-<script src="js/16-medidas.js?v=22" defer></script>
-<script src="js/17-elementos.js?v=22" defer></script>
-<script src="js/18-nomes.js?v=22" defer></script>
-<script src="js/19-boot.js?v=22" defer></script>
-<script src="js/20-fotos-superiores.js?v=22" defer></script>
-<script src="js/21-municipios-br.js?v=22" defer></script>
+<script src="js/00-core.js?v=26" defer></script>
+<script src="js/01-map-core.js?v=26" defer></script>
+<script src="js/02-orientation-layers.js?v=26" defer></script>
+<script src="js/03-state.js?v=26" defer></script>
+<script src="js/04-photos.js?v=26" defer></script>
+<script src="js/05-photo-markers.js?v=26" defer></script>
+<script src="js/06-export.js?v=26" defer></script>
+<script src="js/07-map-ui.js?v=26" defer></script>
+<script src="js/08-kml.js?v=26" defer></script>
+<script src="js/09-tabs-bulk.js?v=26" defer></script>
+<script src="js/10-interactions.js?v=26" defer></script>
+<script src="js/11-photo-fixes.js?v=26" defer></script>
+<script src="js/12-search-pontos.js?v=26" defer></script>
+<script src="js/13-sorting.js?v=26" defer></script>
+<script src="js/14-tools.js?v=26" defer></script>
+<script src="js/15-routes.js?v=26" defer></script>
+<script src="js/16-medidas.js?v=26" defer></script>
+<script src="js/17-elementos.js?v=26" defer></script>
+<script src="js/18-nomes.js?v=26" defer></script>
+<script src="js/19-boot.js?v=26" defer></script>
+<script src="js/20-fotos-superiores.js?v=26" defer></script>
+<script src="js/21-municipios-br.js?v=26" defer></script>
+<script src="js/22-gpx.js?v=26" defer></script>
 </body>
 </html>

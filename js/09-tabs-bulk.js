@@ -16,6 +16,12 @@ window.switchTab = function(tab) {
   if (tab !== 'rotas' && typeof _routePickingKey !== 'undefined' && _routePickingKey) {
     window.toggleRoutePicking(_routePickingKey);
   }
+  // Cancel "escolher Cidade Antes/Depois no mapa" if switching away from
+  // the Dados tab -- mesmo motivo dos dois cancelamentos acima.
+  if (tab !== 'medidas' && typeof _medidasCidadePick !== 'undefined' && _medidasCidadePick && typeof _cancelMedidasCidadePicking === 'function') {
+    _cancelMedidasCidadePicking();
+    if (typeof _renderMedidasList === 'function') _renderMedidasList();
+  }
   // The structure outline drawing only makes sense while looking at the
   // Medidas tab -- show it when entering, hide it the moment you leave.
   if (typeof _setMedidasLayerVisible === 'function') {
@@ -27,12 +33,17 @@ window.switchTab = function(tab) {
   if (tab === 'medidas' && typeof _updateInspectionDate === 'function') {
     _updateInspectionDate();
   }
+  // The GPX track/photo preview only makes sense while looking at the GPX
+  // tab -- same idea as the Medidas outline above.
+  if (typeof _setGpxLayerVisible === 'function') {
+    _setGpxLayerVisible(tab === 'gpx');
+  }
   // Elementos/Nomes cover the whole screen and don't use the sidebar, so
   // floating sidebar controls (like the collapse toggle) that sit at a
   // higher z-index than the overlay would otherwise poke through on top
   // of it -- this class lets CSS hide them specifically for these tabs.
   document.body.classList.toggle('fullscreen-tab-active', tab === 'elementos' || tab === 'nomes');
-  ['photos','pontos','rotas','medidas','elementos','nomes'].forEach(t => {
+  ['photos','pontos','rotas','medidas','elementos','nomes','gpx'].forEach(t => {
     const btn = document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1));
     const content = document.getElementById('tabContent' + t.charAt(0).toUpperCase() + t.slice(1));
     if (btn)     btn.classList.toggle('active',     t === tab);

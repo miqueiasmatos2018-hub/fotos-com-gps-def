@@ -131,15 +131,68 @@ function _fsupRenderStatus() {
   if (done === total) dlBtn.addEventListener('click', () => _fsupDownloadPhotos(assigned));
 }
 
-// Fotos baixadas direto (sem zip) -- um <a download> por foto, com um
-// pequeno intervalo entre cada uma: disparar vários downloads no mesmo
-// instante faz o navegador bloquear ou juntar tudo num só. O "finally"
-// garante que o botão sempre volta ao normal, inclusive quando dá certo --
-// antes só o catch reativava o botão, então um download bem-sucedido
-// deixava o botão travado em "GERANDO ZIP…" para sempre.
+// Salva as fotos renomeadas numa pasta de verdade (File System Access API
+// -- mesmo caminho que exportAllSmart() usa em 06-export.js), sem passar
+// por ZIP. Onde essa API não existe (Firefox, Safari), cai de volta para o
+// download solto de cada arquivo. Nenhuma reescrita de EXIF acontece aqui
+// -- é só o arquivo original com o nome trocado, então o download direto
+// (sem canvas/piexif) preserva os bytes exatamente como vieram da câmera.
 async function _fsupDownloadPhotos(assignedItems) {
   const btn = document.getElementById('fsupDownloadBtn');
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ BAIXANDO…'; }
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ SALVANDO…'; }
+
+  if (window.showDirectoryPicker) {
+    let dirHandle;
+    try {
+      dirHandle = await window.showDirectoryPicker({
+        mode: 'readwrite',
+        startIn: 'downloads',
+        id: 'fotos-superiores-export'
+      });
+    } catch (e) {
+      if (e && e.name === 'AbortError') {
+        // A pessoa cancelou o seletor de pasta -- não cai para download
+        // solto nesse caso, só desfaz o estado "salvando" do botão.
+        if (btn) { btn.disabled = false; btn.textContent = '⬇ BAIXAR RENOMEADAS'; }
+        return;
+      }
+      dirHandle = null; // sem permissão / API indisponível -> cai no download solto
+    }
+
+    if (dirHandle) {
+      try {
+        const folder = await dirHandle.getDirectoryHandle('fotos superiores', { create: true });
+        const used = new Set();
+        let errors = 0;
+        for (const it of assignedItems) {
+          const filename = makeUniqueName(`${_fsupLabelFor(it.order)}${_fsupExt(it.file.name)}`, used);
+          try {
+            const fileHandle = await folder.getFileHandle(filename, { create: true });
+            const writable = await fileHandle.createWritable();
+            await writable.write(it.file);
+            await writable.close();
+          } catch (writeErr) {
+            errors++;
+            console.error('Não foi possível salvar', filename, writeErr);
+          }
+        }
+        showToast(errors
+          ? `✓ ${assignedItems.length - errors} fotos salvas na pasta (${errors} com erro)`
+          : `✓ <span class="accent">${assignedItems.length} fotos</span> salvas na pasta "fotos superiores"`);
+        if (btn) { btn.disabled = false; btn.textContent = '⬇ BAIXAR RENOMEADAS'; }
+        return;
+      } catch (err) {
+        console.error('Exportação de fotos superiores para pasta falhou, caindo para download solto:', err);
+      }
+    }
+  }
+
+  // Alternativa: um <a download> por foto, com um pequeno intervalo entre
+  // cada uma -- disparar vários downloads no mesmo instante faz o
+  // navegador bloquear ou juntar tudo num só. O "finally" garante que o
+  // botão sempre volta ao normal, inclusive quando dá certo -- antes só o
+  // catch reativava o botão, então um download bem-sucedido deixava o
+  // botão travado em "GERANDO ZIP…" para sempre.
   try {
     for (const it of assignedItems) {
       triggerDownload(it.file, `${_fsupLabelFor(it.order)}${_fsupExt(it.file.name)}`);

@@ -826,6 +826,7 @@ function _startMedidasCidadePicking(key, field) {
   if (typeof _pontoPickingHandler !== 'undefined' && _pontoPickingHandler) window.togglePontoPicking();
   if (typeof _routePickingKey !== 'undefined' && _routePickingKey) window.toggleRoutePicking(_routePickingKey);
   if (typeof _pickingForId !== 'undefined' && _pickingForId) cancelRelocateMode();
+  if (typeof _viaPickingCleanup !== 'undefined' && _viaPickingCleanup) _viaPickingCleanup();
 
   const label = field === 'cidadeAntes' ? 'Cidade Antes' : 'Cidade Depois';
   document.getElementById('map').classList.add('picking-location');

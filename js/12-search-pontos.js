@@ -108,6 +108,14 @@ window.togglePontoPicking = function() {
     return;
   }
 
+  // Não colidir com o modo de escolher Cidade Antes/Depois no mapa
+  // (16-medidas.js) -- sem isso, os dois cliques ficavam concorrendo pelo
+  // mesmo clique no mapa.
+  if (typeof _medidasCidadePick !== 'undefined' && _medidasCidadePick && typeof _cancelMedidasCidadePicking === 'function') {
+    _cancelMedidasCidadePicking();
+    if (typeof _renderMedidasList === 'function') _renderMedidasList();
+  }
+
   // Start picking
   if (btn)    { btn.classList.add('active'); btn.textContent = '✕ Cancelar'; }
   if (banner) {

@@ -164,6 +164,13 @@ let _pickingKeyHandler = null;
 window.startRelocateMode = function(id) {
   // Cancel any existing picking session
   cancelRelocateMode();
+  // Não colidir com o modo de escolher Cidade Antes/Depois no mapa
+  // (16-medidas.js) -- os dois usam map.once('click', ...) e ficariam
+  // concorrendo pelo mesmo clique.
+  if (typeof _medidasCidadePick !== 'undefined' && _medidasCidadePick && typeof _cancelMedidasCidadePicking === 'function') {
+    _cancelMedidasCidadePicking();
+    if (typeof _renderMedidasList === 'function') _renderMedidasList();
+  }
 
   _pickingForId = id;
   const mapEl = document.getElementById('map');

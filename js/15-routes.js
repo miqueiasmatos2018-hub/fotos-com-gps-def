@@ -949,6 +949,10 @@ window.pickAlternateRouteVia = function() {
   if (typeof _pontoPickingHandler !== 'undefined' && _pontoPickingHandler) window.togglePontoPicking();
   if (typeof _pickingForId !== 'undefined' && _pickingForId) cancelRelocateMode();
   if (_viaPickingCleanup) _viaPickingCleanup();
+  if (typeof _medidasCidadePick !== 'undefined' && _medidasCidadePick && typeof _cancelMedidasCidadePicking === 'function') {
+    _cancelMedidasCidadePicking();
+    if (typeof _renderMedidasList === 'function') _renderMedidasList();
+  }
 
   const first = src.waypoints[0];
   const last  = src.waypoints[src.waypoints.length - 1];
@@ -1128,6 +1132,10 @@ window.toggleRoutePicking = function(key) {
   if (typeof _pontoPickingHandler !== 'undefined' && _pontoPickingHandler) window.togglePontoPicking();
   if (typeof _pickingForId !== 'undefined' && _pickingForId) cancelRelocateMode();
   if (_viaPickingCleanup) _viaPickingCleanup();
+  if (typeof _medidasCidadePick !== 'undefined' && _medidasCidadePick && typeof _cancelMedidasCidadePicking === 'function') {
+    _cancelMedidasCidadePicking();
+    if (typeof _renderMedidasList === 'function') _renderMedidasList();
+  }
 
   // Start picking for this route
   _routePickingKey = key;

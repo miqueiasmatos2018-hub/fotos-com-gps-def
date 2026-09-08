@@ -117,31 +117,40 @@ function _fsupRenderStatus() {
       <button class="elem-btn" id="fsupUndoBtn" type="button" style="flex:1;" ${done === 0 ? 'disabled' : ''}>↩ Desfazer última</button>
       <button class="elem-btn" id="fsupResetBtn" type="button" style="flex:1;" ${done === 0 ? 'disabled' : ''}>↺ Reiniciar numeração</button>
     </div>
-    <button class="elem-btn primary" id="fsupDownloadBtn" type="button" style="margin-top:8px;width:100%;" ${done === total ? '' : 'disabled'}>
-      ⬇ BAIXAR RENOMEADAS (.zip)${done === total ? '' : ` — faltam ${total - done}`}
-    </button>
-    <button class="elem-btn" id="fsupCancelBtn" type="button" style="margin-top:6px;width:100%;">✕ Cancelar</button>
+    <div class="fsup-download-bar">
+      <button class="elem-btn primary" id="fsupDownloadBtn" type="button" style="width:100%;" ${done === total ? '' : 'disabled'}>
+        ⬇ BAIXAR RENOMEADAS${done === total ? '' : ` — faltam ${total - done}`}
+      </button>
+      <button class="elem-btn" id="fsupCancelBtn" type="button" style="margin-top:6px;width:100%;">✕ Cancelar</button>
+    </div>
   `;
   document.getElementById('fsupUndoBtn').addEventListener('click', _fsupUndoLast);
   document.getElementById('fsupResetBtn').addEventListener('click', _fsupResetNumbering);
   document.getElementById('fsupCancelBtn').addEventListener('click', _fsupClearSession);
   const dlBtn = document.getElementById('fsupDownloadBtn');
-  if (done === total) dlBtn.addEventListener('click', () => _fsupDownloadZip(assigned));
+  if (done === total) dlBtn.addEventListener('click', () => _fsupDownloadPhotos(assigned));
 }
 
-async function _fsupDownloadZip(assignedItems) {
+// Fotos baixadas direto (sem zip) -- um <a download> por foto, com um
+// pequeno intervalo entre cada uma: disparar vários downloads no mesmo
+// instante faz o navegador bloquear ou juntar tudo num só. O "finally"
+// garante que o botão sempre volta ao normal, inclusive quando dá certo --
+// antes só o catch reativava o botão, então um download bem-sucedido
+// deixava o botão travado em "GERANDO ZIP…" para sempre.
+async function _fsupDownloadPhotos(assignedItems) {
   const btn = document.getElementById('fsupDownloadBtn');
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ GERANDO ZIP…'; }
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ BAIXANDO…'; }
   try {
-    const zip = new JSZip();
-    assignedItems.forEach(it => zip.file(`${_fsupLabelFor(it.order)}${_fsupExt(it.file.name)}`, it.file));
-    const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
-    triggerDownload(blob, 'fotos_superiores_renomeadas.zip');
+    for (const it of assignedItems) {
+      triggerDownload(it.file, `${_fsupLabelFor(it.order)}${_fsupExt(it.file.name)}`);
+      await _sleep(250);
+    }
     showToast('✓ Fotos superiores renomeadas e baixadas');
   } catch (e) {
-    console.error('Geração do ZIP de fotos superiores falhou:', e);
-    showToast('⚠ Não foi possível gerar o ZIP');
-    if (btn) { btn.disabled = false; btn.textContent = '⬇ BAIXAR RENOMEADAS (.zip)'; }
+    console.error('Download das fotos superiores falhou:', e);
+    showToast('⚠ Não foi possível baixar as fotos');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '⬇ BAIXAR RENOMEADAS'; }
   }
 }
 

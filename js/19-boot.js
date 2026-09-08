@@ -29,4 +29,22 @@
   } else {
     boot();
   }
+
+  // ─── ALTURA REAL DO HEADER ────────────────────────────────────────────
+  // O CSS usava um valor fixo (68px) para calcular a altura do resto da
+  // página e para posicionar as abas Elementos/Nomes (que cobrem a tela
+  // toda) logo abaixo do header. Isso quebrava sempre que o header ficava
+  // mais alto que 68px -- o que acontece no celular, onde as abas de cima
+  // (Fotos/Pontos/Rotas/...) descem para uma segunda linha. Em vez de
+  // chutar um número por breakpoint, medimos a altura real do header e
+  // guardamos em --header-h para o CSS usar.
+  function _syncHeaderHeight() {
+    const header = document.querySelector('header');
+    if (header) {
+      document.documentElement.style.setProperty('--header-h', header.offsetHeight + 'px');
+    }
+  }
+  _syncHeaderHeight();
+  window.addEventListener('resize', _syncHeaderHeight);
+  window.addEventListener('orientationchange', _syncHeaderHeight);
 })();

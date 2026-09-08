@@ -16,6 +16,9 @@
     --radius: 6px;
     --shadow: 0 1px 3px rgba(0,0,0,0.5), 0 4px 16px rgba(0,0,0,0.4);
     --shadow-lg: 0 8px 32px rgba(0,0,0,0.7), 0 2px 8px rgba(0,0,0,0.5);
+    /* Valor de partida antes do JS medir a altura real do header (19-boot.js
+       ajusta isso a cada load/resize/orientationchange). */
+    --header-h: 68px;
   }
 
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -509,12 +512,72 @@
     .top-tabs { grid-column: 1 / -1; justify-content: flex-start; overflow-x: auto; }
   }
 
+  /* ==========================================================================
+     PHONE LAYOUT
+     Sidebar (Fotos/Pontos/Rotas/Dados lists) and the map no longer fit side
+     by side below ~760px, so only one shows at a time -- a floating button
+     (.mobile-view-toggle, wired up by toggleMobileMapView() in
+     07-map-ui.js) flips between them. Elementos/Nomes already cover the
+     whole screen on every size (#tabContentElementos.active etc. above)
+     and don't use the sidebar/map split at all, so they just get tighter
+     padding here.
+     ========================================================================== */
+  @media (max-width: 760px) {
+    .logo-bridge { display: none; } /* decorative -- not worth the width here */
+
+    .sidebar {
+      width: 100% !important;
+      min-width: 0;
+      max-width: none;
+      border-right: none;
+      border-bottom: 1px solid var(--border);
+    }
+    .sidebar-resizer,
+    .sidebar-toggle { display: none; }
+
+    .app:not(.mobile-show-map) .map-container { display: none; }
+    .app.mobile-show-map .sidebar { display: none; }
+    .mobile-view-toggle { display: flex; }
+
+    /* Floating map controls, a bit more compact on a narrow screen. */
+    .map-btn { font-size: 9px; padding: 7px 10px; }
+    .map-overlay { gap: 6px; }
+    .layer-panel { left: 10px; right: 10px; min-width: 0; }
+
+    /* Centered banners would otherwise sit under the list/map toggle. */
+    .picking-banner,
+    .measure-banner {
+      bottom: 74px;
+      max-width: calc(100vw - 32px);
+      white-space: normal;
+      text-align: center;
+    }
+
+    #tabContentElementos.active,
+    #tabContentNomes.active { padding: 14px; }
+    .elem-titleblock,
+    .nomes-titleblock { padding: 12px; }
+
+    /* Popups sized for desktop overflow a ~360px-wide phone. */
+    .export-overlay-box { min-width: 0; width: 88%; max-width: 320px; padding: 22px 20px; }
+    .issues-alert-box { width: 90%; padding: 26px 22px; }
+    .toast { max-width: calc(100vw - 32px); white-space: normal; text-align: center; }
+  }
+
+  @media (max-width: 420px) {
+    .top-tab-btn { padding: 7px 10px; font-size: 10px; }
+    .top-tab-icon { font-size: 12px; }
+    .map-btn { font-size: 8px; padding: 6px 8px; }
+    .compass-rose { width: 56px; height: 56px; }
+  }
+
   /* MAIN LAYOUT */
   .app {
     display: flex;
     flex: 1;
+    min-height: 0;
     overflow: hidden;
-    height: calc(100vh - 68px);
+    position: relative;
   }
 
   /* SIDEBAR */
@@ -587,6 +650,31 @@
     background: var(--accent);
     opacity: 0.4;
   }
+
+  /* MOBILE LIST/MAP TOGGLE (see @media block near the end of this file) --
+     hidden on desktop, where sidebar + map already show side by side. */
+  .mobile-view-toggle {
+    display: none;
+    position: absolute;
+    bottom: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1000;
+    align-items: center;
+    gap: 6px;
+    background: var(--accent);
+    color: #0a0a0a;
+    border: none;
+    font-family: var(--mono);
+    font-weight: 700;
+    font-size: 12px;
+    letter-spacing: 0.5px;
+    padding: 10px 20px;
+    border-radius: 999px;
+    cursor: pointer;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 0 4px rgba(212,245,60,0.15);
+  }
+  body.fullscreen-tab-active .mobile-view-toggle { display: none; }
 
   /* PONTOS TAB */
   .pontos-empty {
@@ -704,6 +792,24 @@
   .medidas-row-copy.copied { background: #4caf50; border-color: #4caf50; color: #0a1f0a; }
   .medidas-row-copy.copy-failed { background: #f44336; border-color: #f44336; color: #fff; }
 
+  /* Cidade Antes/Depois: o próprio valor é um botão -- clique pra escolher
+     a cidade direto no mapa em vez de confiar só na busca automática. */
+  .medidas-row-pick {
+    background: none;
+    border: 1px dashed var(--border2);
+    color: var(--text);
+    font-family: var(--mono);
+    font-weight: 400;
+    font-size: 11px;
+    padding: 3px 7px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s;
+    text-align: left;
+  }
+  .medidas-row-pick:hover { border-color: var(--accent); background: rgba(212,245,60,0.08); color: #ffffff; }
+  .medidas-row-pick.active { border-color: var(--accent); background: rgba(212,245,60,0.18); color: var(--accent); }
+
   .medidas-subhead {
     font-family: var(--mono);
     font-size: 10px;
@@ -753,11 +859,10 @@
   #tabContentElementos.active {
     display: flex;
     position: fixed;
-    top: 68px;
+    top: var(--header-h, 68px);
     left: 0;
     right: 0;
     bottom: 0;
-    width: 100vw;
     z-index: 1050;
     background: var(--bg);
     padding: 20px 28px;
@@ -1036,11 +1141,10 @@
   #tabContentNomes.active {
     display: flex;
     position: fixed;
-    top: 68px;
+    top: var(--header-h, 68px);
     left: 0;
     right: 0;
     bottom: 0;
-    width: 100vw;
     z-index: 1050;
     background: var(--bg);
     padding: 20px 28px;
@@ -1539,6 +1643,48 @@
 
   .route-export-btn { flex-shrink: 0; }
 
+  /* KML + IMAGEM lado a lado, tamanho fixo, grudados no rodapé da aba
+     (#tabContentRotas já rola sozinha -- overflow-y:auto -- então sticky
+     aqui gruda no fundo da área visível dela, sem precisar rolar até o
+     fim pra alcançar os botões). */
+  .route-export-row {
+    position: sticky;
+    bottom: 0;
+    display: flex;
+    gap: 8px;
+    margin-top: 4px;
+    padding-top: 10px;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+  }
+  .route-export-row .route-export-btn {
+    flex: 1 1 0;
+    height: 38px;
+    font-size: 11px;
+  }
+
+  /* Reimportar um KML de rotas exportado antes por esta ferramenta --
+     restaura as paradas de cada rota para continuar editando. */
+  .route-reimport-row { display: flex; }
+  .route-reimport-btn {
+    flex: 1;
+    background: none;
+    border: 1px dashed var(--border2);
+    color: var(--text2);
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.3px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+  }
+  .route-reimport-btn:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+    background: rgba(212,245,60,0.06);
+  }
+
   .route-alternatives {
     display: flex;
     flex-wrap: wrap;
@@ -1789,6 +1935,18 @@
   }
   .fsup-row b { color: var(--accent); width: 36px; flex-shrink: 0; }
   .fsup-row span { color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* Baixar/Cancelar ficam grudados no rodapé da ferramenta (dentro da
+     área que já rola sozinha -- #fsupFields tem max-height:42vh acima) em
+     vez de exigir rolar até o fim da lista de pinos pra alcançá-los. */
+  .fsup-download-bar {
+    position: sticky;
+    bottom: 0;
+    margin-top: 10px;
+    padding-top: 8px;
+    background: var(--panel);
+    border-top: 1px solid var(--border);
+  }
 
   .fsup-pin {
     width: 32px;
@@ -2174,7 +2332,9 @@
   /* MAP OVERLAY UI */
   .map-overlay {
     position: absolute;
-    top: 16px;
+    /* 64px = altura da .map-search-bar (48px) + 16px de respiro -- sem
+       isso os botões ficavam por cima da barra de busca do KML. */
+    top: 64px;
     right: 16px;
     z-index: 1000;
     display: flex;
@@ -2999,7 +3159,13 @@
   .layer-panel {
     position: absolute;
     bottom: 16px;
-    left: 335px;
+    /* Era "left: 335px", um chute de "largura padrão da sidebar (320px) +
+       15px" só funcionava por acidente com .map-container sem posição
+       própria (o painel realmente caía relativo à janela toda). Agora que
+       .map-container tem position:relative, esse valor precisa ser
+       relativo à própria área do mapa -- e nem fazia sentido para uma
+       sidebar redimensionável (200–600px) ou minimizada. */
+    left: 16px;
     z-index: 1000;
     background: rgba(10,10,10,0.9);
     border: 1px solid var(--border2);

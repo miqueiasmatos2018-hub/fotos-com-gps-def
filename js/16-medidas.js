@@ -534,24 +534,33 @@ async function _startMedidasCidadesLookup(s) {
     // is also the highway's direction of travel at that exact point.
     const roadBearing = (90 - a.anguloEixo + 360) % 360;
 
-    // Busca cidades num raio, filtra pelas que ficam sobre a geometria da
-    // própria BR (quando disponível) e cai para a lista sem filtro se essa
-    // checagem não achar nada.
+    // Busca cidades num raio e filtra pelas que ficam sobre a geometria da
+    // própria BR. CORREÇÃO: antes, quando a checagem contra a BR não achava
+    // nenhuma cidade (via não encontrada no Overpass, nenhuma dentro de
+    // CIDADE_MATCH_RADIUS_M da geometria, etc.), o código caía de volta para
+    // "qualquer cidade próxima, de qualquer rodovia" -- por isso apareciam
+    // sugestões de cidades que não têm nada a ver com a BR do KML sendo
+    // analisado. Isso só é aceitável quando a BR em si é desconhecida (sem
+    // "digits" não há contra o que filtrar); sabendo a BR, uma cidade que
+    // não bateu na checagem é tratada como "não encontrada" em vez de
+    // arriscar mostrar uma cidade errada num relatório de inspeção.
     async function candidatesAt(radiusM) {
-      const [cities, brWays] = await Promise.all([
-        _fetchCidadesNear(ld.lat, ld.lng, radiusM),
-        digits ? _fetchBRWaysNear(ld.lat, ld.lng, digits, radiusM).catch(err => {
-          console.warn('BR-geometry lookup for Cidade Antes/Depois failed, falling back to unfiltered:', err);
-          return [];
-        }) : Promise.resolve([])
-      ]);
+      if (!digits) return await _fetchCidadesNear(ld.lat, ld.lng, radiusM); // BR desconhecida -- nada pra filtrar contra
+      let cities, brWays;
+      try {
+        [cities, brWays] = await Promise.all([
+          _fetchCidadesNear(ld.lat, ld.lng, radiusM),
+          _fetchBRWaysNear(ld.lat, ld.lng, digits, radiusM)
+        ]);
+      } catch (err) {
+        console.warn('Cidade Antes/Depois (filtro por BR) falhou:', err);
+        return [];
+      }
+      if (!brWays.length) return [];
       const matchKm = CIDADE_MATCH_RADIUS_M / 1000;
-      const onBR = brWays.length
-        ? cities.filter(c => c.lat != null && c.lon != null && brWays.some(w =>
-            (w.geometry || []).some(pt => _haversineKm(c.lat, c.lon, pt.lat, pt.lon) <= matchKm)
-          ))
-        : [];
-      return onBR.length ? onBR : cities;
+      return cities.filter(c => c.lat != null && c.lon != null && brWays.some(w =>
+        (w.geometry || []).some(pt => _haversineKm(c.lat, c.lon, pt.lat, pt.lon) <= matchKm)
+      ));
     }
 
     let { antes, depois } = _pickCidadesAntesDepois(
@@ -626,6 +635,18 @@ function _medidasCopyBtn(value) {
 function _medidasCopyRow(label, value, pending) {
   const btn = pending ? '' : _medidasCopyBtn(value);
   return `<div class="medidas-row"><span>${label}</span><span class="medidas-row-value"><b>${escapeHtml(value)}</b>${btn}</span></div>`;
+}
+
+// Same idea, but for Cidade Antes/Depois: the value itself is a button --
+// click it to pick that city by clicking the map instead of trusting only
+// the automatic (BR-filtered) search. Still keeps the copy button once
+// there's a real value to copy.
+function _medidasCidadeRow(label, key, field, value, pending) {
+  const isPicking = _medidasCidadePick && _medidasCidadePick.key === key && _medidasCidadePick.field === field;
+  const btn = pending ? '' : _medidasCopyBtn(value);
+  return `<div class="medidas-row"><span>${label}</span><span class="medidas-row-value">` +
+    `<button class="medidas-row-pick${isPicking ? ' active' : ''}" data-key="${key}" data-field="${field}" title="Clique para escolher no mapa">${escapeHtml(value)}</button>` +
+    `${btn}</span></div>`;
 }
 
 // LAT/LONG are truncated (not rounded) to a fixed number of decimals --
@@ -707,8 +728,8 @@ function _renderMedidasList() {
         ${_medidasCopyRow('Código SNV', s.dnitSnvCodigo != null ? s.dnitSnvCodigo : 'consultando…', s.dnitSnvCodigo == null)}
         ${_medidasCopyRow('Versão SNV', s.dnitSnvVersao != null ? s.dnitSnvVersao : 'consultando…', s.dnitSnvVersao == null)}
         <div class="medidas-row"><span>Melhor Época</span><b>${escapeHtml(s.melhorEpoca != null ? s.melhorEpoca : 'calculando…')}</b></div>
-        ${_medidasCopyRow('Cidade Antes', s.cidadeAntes != null ? s.cidadeAntes : 'consultando…', s.cidadeAntes == null)}
-        ${_medidasCopyRow('Cidade Depois', s.cidadeDepois != null ? s.cidadeDepois : 'consultando…', s.cidadeDepois == null)}
+        ${_medidasCidadeRow('Cidade Antes', key, 'cidadeAntes', s.cidadeAntes != null ? s.cidadeAntes : 'consultando…', s.cidadeAntes == null)}
+        ${_medidasCidadeRow('Cidade Depois', key, 'cidadeDepois', s.cidadeDepois != null ? s.cidadeDepois : 'consultando…', s.cidadeDepois == null)}
         <button class="medidas-focus-btn" data-key="${key}">📍 Focar no mapa</button>
       </div>
     `;
@@ -752,6 +773,93 @@ function _renderMedidasList() {
         });
     });
   });
+
+  list.querySelectorAll('.medidas-row-pick').forEach(btn => {
+    btn.addEventListener('click', () => _startMedidasCidadePicking(btn.dataset.key, btn.dataset.field));
+  });
+}
+
+// ─── ESCOLHER CIDADE ANTES/DEPOIS CLICANDO NO MAPA ─────────────────────────
+// A busca automática (_startMedidasCidadesLookup acima) tenta acertar
+// sozinha, filtrando por população e pela geometria da BR -- mas às vezes a
+// pessoa já sabe exatamente qual cidade quer usar (ou o KML nem tem uma BR
+// identificada). Clicar no valor de Cidade Antes/Depois entra em modo de
+// seleção: o próximo clique no mapa vira a cidade mais próxima daquele
+// ponto (sem filtro de população nem de BR -- a escolha manual já é a
+// confirmação de que aquele é o ponto certo).
+const MEDIDAS_CIDADE_PICK_RADIUS_M      = 15000; // 15km
+const MEDIDAS_CIDADE_PICK_WIDE_RADIUS_M = 60000; // 60km, se nada aparecer no raio normal
+
+function _nearestCidade(cities, lat, lng) {
+  let best = null, bestDist = Infinity;
+  cities.forEach(c => {
+    if (!c.tags || !c.tags.name || c.lat == null || c.lon == null) return;
+    if (CIDADE_NAME_EXCLUDE_RE.test(c.tags.name)) return;
+    const dist = _haversineKm(lat, lng, c.lat, c.lon);
+    if (dist < bestDist) { bestDist = dist; best = c.tags.name; }
+  });
+  return best;
+}
+
+let _medidasCidadePick = null; // { key, field, click, keydown }
+
+function _cancelMedidasCidadePicking() {
+  if (!_medidasCidadePick) return;
+  map.off('click', _medidasCidadePick.click);
+  document.removeEventListener('keydown', _medidasCidadePick.keydown);
+  document.getElementById('map').classList.remove('picking-location');
+  const banner = document.getElementById('pickingBanner');
+  if (banner) banner.classList.remove('show');
+  _medidasCidadePick = null;
+}
+
+function _startMedidasCidadePicking(key, field) {
+  const s = MEDIDAS_STRUCTURES[key];
+  if (!s) return;
+
+  // Clicar de novo no mesmo botão cancela em vez de reiniciar a seleção.
+  const wasSameField = _medidasCidadePick && _medidasCidadePick.key === key && _medidasCidadePick.field === field;
+  _cancelMedidasCidadePicking();
+  if (wasSameField) { _renderMedidasList(); return; }
+
+  // Não colidir com os outros modos de "clicar no mapa" do app.
+  if (typeof _pontoPickingHandler !== 'undefined' && _pontoPickingHandler) window.togglePontoPicking();
+  if (typeof _routePickingKey !== 'undefined' && _routePickingKey) window.toggleRoutePicking(_routePickingKey);
+  if (typeof _pickingForId !== 'undefined' && _pickingForId) cancelRelocateMode();
+
+  const label = field === 'cidadeAntes' ? 'Cidade Antes' : 'Cidade Depois';
+  document.getElementById('map').classList.add('picking-location');
+  const banner = document.getElementById('pickingBanner');
+  if (banner) {
+    banner.textContent = `📍 Clique no mapa para definir ${label} manualmente · ESC para cancelar`;
+    banner.classList.add('show');
+  }
+
+  const click = async e => {
+    const { lat, lng } = e.latlng;
+    _cancelMedidasCidadePicking();
+    s[field] = 'consultando…';
+    _renderMedidasList();
+    try {
+      let cities = await _fetchCidadesNear(lat, lng, MEDIDAS_CIDADE_PICK_RADIUS_M);
+      let name = _nearestCidade(cities, lat, lng);
+      if (!name) {
+        cities = await _fetchCidadesNear(lat, lng, MEDIDAS_CIDADE_PICK_WIDE_RADIUS_M);
+        name = _nearestCidade(cities, lat, lng);
+      }
+      s[field] = name || 'não encontrada';
+    } catch (err) {
+      console.error(`${label} (seleção manual no mapa) falhou:`, err);
+      s[field] = 'erro na consulta';
+    }
+    _renderMedidasList();
+  };
+  const keydown = e => { if (e.key === 'Escape') { _cancelMedidasCidadePicking(); _renderMedidasList(); } };
+
+  _medidasCidadePick = { key, field, click, keydown };
+  map.once('click', click);
+  document.addEventListener('keydown', keydown);
+  _renderMedidasList(); // marca o botão como ativo
 }
 
 // ─── MAP DRAWING (only while the Medidas tab is open) ──────────────────────

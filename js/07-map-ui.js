@@ -71,3 +71,21 @@ function formatSize(bytes) {
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + 'KB';
   return (bytes / 1024 / 1024).toFixed(1) + 'MB';
 }
+
+// ─── MOBILE LIST/MAP TOGGLE ────────────────────────────────────────────────
+// On phone widths the sidebar and the map no longer fit side by side (see
+// the ".mobile-view-toggle" / ".app.mobile-show-map" rules in styles.css),
+// so only one is shown at a time and this button flips between them. The
+// map starts hidden (display:none), so Leaflet computes a 0×0 size for it
+// on boot -- invalidateSize() right after revealing it is required or the
+// tiles render wrong/blank until the next manual pan/zoom.
+window.toggleMobileMapView = function() {
+  const app = document.querySelector('.app');
+  const btn = document.getElementById('mobileViewToggle');
+  if (!app) return;
+  const showingMap = app.classList.toggle('mobile-show-map');
+  if (btn) btn.innerHTML = showingMap ? '☰ Lista' : '🗺 Mapa';
+  if (showingMap && typeof map !== 'undefined' && map) {
+    setTimeout(() => map.invalidateSize(), 60);
+  }
+};

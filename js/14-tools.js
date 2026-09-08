@@ -21,7 +21,14 @@
   const banner     = document.getElementById('measureBanner');
 
   function formatDist(m) {
-    return m >= 1000 ? `${(m/1000).toFixed(2)} km` : `${Math.round(m)} m`;
+    if (m >= 1000) return `${(m/1000).toFixed(2)} km`;
+    if (m < 1) return `${Math.round(m * 100)} cm`;
+    const whole = Math.floor(m);
+    let cm = Math.round((m - whole) * 100);
+    // 99.6cm arredondava pra "100 cm" sobrando dentro do metro -- em vez
+    // de "12 m 100 cm", isso vira "13 m".
+    if (cm === 100) return `${whole + 1} m`;
+    return cm > 0 ? `${whole} m ${cm} cm` : `${whole} m`;
   }
 
   function clearMeasure() {

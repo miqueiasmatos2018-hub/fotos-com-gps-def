@@ -1178,8 +1178,15 @@ window.exportRoutesKML = function() {
     const coords = (r.roadCoords && r.roadCoords.length >= 2) ? r.roadCoords : r.waypoints;
     const coordStr = coords.map(c => `${c.lng},${c.lat},0`).join(' ');
     const kmlColor = _hexToKmlColor(r.color, 1);
+    // ExtendedData carrega as paradas ORIGINAIS (não a linha inteira
+    // ajustada às ruas, que pode ter centenas de pontos) -- é o que
+    // importRoutesKML() lê de volta para restaurar a rota editável caso
+    // esse KML seja reimportado depois. Não aparece em nenhum visualizador
+    // de KML (Google Earth etc. ignoram ExtendedData ao desenhar).
+    const stopsStr = r.waypoints.map(w => `${w.lat},${w.lng}`).join(';');
     return `  <Placemark>
     <name>${_escapeXml(_composeRouteName(key))}</name>
+    <ExtendedData><Data name="stops"><value>${_escapeXml(stopsStr)}</value></Data></ExtendedData>
     <Style><LineStyle><color>${kmlColor}</color><width>4</width></LineStyle></Style>
     <LineString><tessellate>1</tessellate><coordinates>${coordStr}</coordinates></LineString>
   </Placemark>`;
@@ -1213,6 +1220,125 @@ ${routePlacemarks}${routePlacemarks && ldPlacemarks ? '\n' : ''}${ldPlacemarks}
   if (LD_INICIO_POINTS.length) parts.push(`${LD_INICIO_POINTS.length} ponto${LD_INICIO_POINTS.length > 1 ? 's' : ''} LD_INICIO_OAE`);
   showToast(`⬇ <span class="accent">${parts.join(' + ')}</span> exportado(s)`);
 };
+
+// ─── REIMPORTAR (restaurar paradas de um KML exportado antes por esta
+// mesma ferramenta) ──────────────────────────────────────────────────────
+// O <coordinates> visível de cada rota é a linha inteira ajustada às ruas
+// (às vezes centenas de pontos) -- reimportar isso como "paradas" lotaria
+// a lista de paradas com pontos que a pessoa nunca colocou ali. Por isso
+// exportRoutesKML() também grava as paradas originais em
+// <ExtendedData><Data name="stops">; é isso que lemos aqui. Um KML mais
+// antigo (exportado antes dessa mudança) não tem esse campo -- nesse caso,
+// caímos de volta para ler a própria linha como lista de paradas (funciona,
+// só que editar fica mais trabalhoso por ter muito mais pontos).
+window.importRoutesKML = async function(file) {
+  let text;
+  try {
+    text = await _readKmlText(file);
+  } catch (e) {
+    console.error('Falha ao ler o KML de rotas:', e);
+    showToast('⚠ Não foi possível ler esse arquivo');
+    return;
+  }
+
+  let xml;
+  try {
+    xml = new DOMParser().parseFromString(text, 'application/xml');
+    if (xml.getElementsByTagName('parsererror').length) throw new Error('XML inválido');
+  } catch (e) {
+    showToast('⚠ Esse arquivo não é um KML válido');
+    return;
+  }
+
+  const placemarks = Array.from(xml.getElementsByTagName('Placemark'));
+  let restored = 0, ldRestored = 0;
+
+  for (const pm of placemarks) {
+    const nameEl = pm.getElementsByTagName('name')[0];
+    const name = nameEl ? nameEl.textContent.trim() : '';
+
+    if (name === 'LD_INICIO_OAE') {
+      const coordEl = pm.getElementsByTagName('coordinates')[0];
+      if (coordEl) {
+        const [lng, lat] = coordEl.textContent.trim().split(',').map(Number);
+        if (Number.isFinite(lat) && Number.isFinite(lng)) {
+          const dup = LD_INICIO_POINTS.some(e => Math.abs(e.lat - lat) < 1e-7 && Math.abs(e.lng - lng) < 1e-7);
+          if (!dup) { LD_INICIO_POINTS.push({ lat, lng }); ldRestored++; }
+        }
+      }
+      continue;
+    }
+
+    const key = name.startsWith(ROUTE_NAME_PREFIX.a) ? 'a'
+              : name.startsWith(ROUTE_NAME_PREFIX.b) ? 'b'
+              : null;
+    if (!key) continue;
+
+    // Meio editável do nome (entre o prefixo fixo e o "_XX.XKM" final).
+    let nameMiddle = name.slice(ROUTE_NAME_PREFIX[key].length)
+      .replace(/_[\d.]+KM$/i, '')
+      .replace(/^_/, '');
+
+    let stops = null;
+    const stopsData = Array.from(pm.getElementsByTagName('Data')).find(d => d.getAttribute('name') === 'stops');
+    if (stopsData) {
+      const valueEl = stopsData.getElementsByTagName('value')[0];
+      if (valueEl) {
+        stops = valueEl.textContent.trim().split(';').filter(Boolean).map(pair => {
+          const [lat, lng] = pair.split(',').map(Number);
+          return { lat, lng };
+        }).filter(w => Number.isFinite(w.lat) && Number.isFinite(w.lng));
+      }
+    }
+    if (!stops || stops.length < 2) {
+      // Sem ExtendedData (KML mais antigo) -- usa a própria linha.
+      const coordEl = pm.getElementsByTagName('coordinates')[0];
+      if (coordEl) {
+        stops = coordEl.textContent.trim().split(/\s+/).filter(Boolean).map(triplet => {
+          const [lng, lat] = triplet.split(',').map(Number);
+          return { lat, lng };
+        }).filter(w => Number.isFinite(w.lat) && Number.isFinite(w.lng));
+      }
+    }
+    if (!stops || stops.length < 2) continue;
+
+    const r = ROUTES[key];
+    if (r.control) { map.removeControl(r.control); r.control = null; }
+    if (r.previewLine) { map.removeLayer(r.previewLine); r.previewLine = null; }
+    r.waypoints = stops;
+    r.nameMiddle = nameMiddle;
+    r.allRoutes = [];
+    r.selectedRouteIdx = 0;
+    r.highwayFraction = null;
+    const input = document.getElementById('routeName' + _routeSuffix(key));
+    if (input) input.value = nameMiddle;
+    _rebuildRouteControl(key);
+    _renderRouteStops(key);
+    _renderRouteAlternatives(key);
+    restored++;
+  }
+
+  if (!restored && !ldRestored) {
+    showToast('⚠ Nenhuma rota reconhecida nesse KML');
+    return;
+  }
+  _updateRouteResults();
+  const parts = [];
+  if (restored) parts.push(`${restored} rota${restored > 1 ? 's' : ''}`);
+  if (ldRestored) parts.push(`${ldRestored} ponto${ldRestored > 1 ? 's' : ''} LD_INICIO_OAE`);
+  showToast(`🔁 <span class="accent">${parts.join(' + ')}</span> reimportado(s)`);
+};
+
+(function _wireRouteReimport() {
+  const btn = document.getElementById('routeReimportBtn');
+  const input = document.getElementById('routeReimportInput');
+  if (!btn || !input) return;
+  btn.addEventListener('click', () => input.click());
+  input.addEventListener('change', () => {
+    if (input.files.length) window.importRoutesKML(input.files[0]);
+    input.value = '';
+  });
+})();
 
 // ─── STATIC ROUTE IMAGE (JPG) ──────────────────────────────────────────────
 // Composes a single satellite-imagery JPG with both routes, the
@@ -1625,40 +1751,36 @@ function _drawRouteImageLabel(ctx, x, y, text, registry) {
   ctx.fillText(text, x + padX, y);
 }
 
-// Small white dot + name pill for a city/town that falls inside the
-// exported frame (see _fetchCitiesInBBox / _pickCitiesForImage above) --
-// visually distinct from the route pins and road shields so it reads as
-// "place on the map", not another stop or highway marker. The dot always
-// stays exactly on the city's real coordinate; only the text pill nudges
-// if it would overlap another label already placed.
+// Name of a city/town that falls inside the exported frame (see
+// _fetchCitiesInBBox / _pickCitiesForImage above) -- just the white name,
+// no dot and no background pill, per the requested style: a black outline
+// around the white text keeps it legible over any satellite background
+// without needing a filled marker or pill behind it. Centered exactly on
+// the city's real coordinate; only nudged (as a whole) if it would overlap
+// another label already placed.
 function _drawCityMarker(ctx, x, y, name, registry) {
   const s = ROUTE_IMAGE_UI_SCALE;
-  ctx.save();
-  ctx.beginPath();
-  ctx.arc(x, y, 3.5 * s, 0, Math.PI * 2);
-  ctx.fillStyle = '#ffffff';
-  ctx.fill();
-  ctx.lineWidth = 1.2 * s;
-  ctx.strokeStyle = '#000';
-  ctx.stroke();
-  ctx.restore();
-
-  const fontSize = 13 * s, padX = 6 * s, padY = 3 * s;
+  const fontSize = 13 * s, padX = 4 * s, padY = 3 * s;
   ctx.font = `600 ${fontSize}px sans-serif`;
-  const w = ctx.measureText(name).width + padX * 2;
-  const h = fontSize + padY * 2;
-  let lx = x + 7 * s, ly = y;
+  const textW = ctx.measureText(name).width;
+  const w = textW + padX * 2, h = fontSize + padY * 2;
+  let boxX = x - w / 2, boxY = y - h / 2;
   if (registry) {
-    const pos = _reserveLabelBox(registry, lx, ly - h / 2, w, h);
-    lx = pos.x; ly = pos.y + h / 2;
+    const pos = _reserveLabelBox(registry, boxX, boxY, w, h);
+    boxX = pos.x; boxY = pos.y;
   }
-  ctx.fillStyle = 'rgba(255,255,255,0.85)';
-  _drawRoundedRect(ctx, lx, ly - h / 2, w, h, 3 * s);
-  ctx.fill();
-  ctx.fillStyle = '#1a1a1a';
+  const cx = boxX + w / 2, cy = boxY + h / 2;
+
+  ctx.save();
   ctx.textBaseline = 'middle';
-  ctx.textAlign = 'left';
-  ctx.fillText(name, lx + padX, ly);
+  ctx.textAlign = 'center';
+  ctx.lineJoin = 'round';
+  ctx.lineWidth = 3 * s;
+  ctx.strokeStyle = 'rgba(0,0,0,0.8)';
+  ctx.strokeText(name, cx, cy);
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText(name, cx, cy);
+  ctx.restore();
 }
 
 // Highway "shield" pill, e.g. "BR-174" / "RR-203" -- fixed pixel font size

@@ -12,7 +12,7 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.css"/>
-<link rel="stylesheet" href="styles.css?v=17">
+<link rel="stylesheet" href="styles.css?v=22">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js" defer></script>
 <script src="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.js" defer></script>
@@ -278,6 +278,14 @@
     </div>
 
     <div class="tab-content" id="tabContentRotas">
+      <div class="route-reimport-row">
+        <button class="route-reimport-btn" id="routeReimportBtn" type="button"
+          title="Reabrir um KML de rotas exportado antes por esta ferramenta, para continuar editando as paradas">
+          🔁 Reimportar KML de rotas
+        </button>
+        <input type="file" id="routeReimportInput" accept=".kml,.kmz" style="display:none">
+      </div>
+
       <div class="route-panel" id="routePanelA" data-route="a" style="--route-color:#ff0000">
         <div class="route-panel-header">
           <span class="route-color-dot"></span>
@@ -328,8 +336,10 @@
         <span class="route-result-value" id="routeDiffValue">—</span>
         <button class="route-result-copy" id="routeCopyDiffBtn" onclick="copyRouteDiffKm()" title="Copiar diferença">Copiar</button>
       </div>
-      <button class="btn-export route-export-btn" id="routeExportBtn" onclick="exportRoutesKML()">⬇ EXPORTAR ROTAS (KML)</button>
-      <button class="btn-export route-export-btn" id="routeImageBtn" onclick="exportRoutesImage()">🖼️ GERAR IMAGEM (JPG)</button>
+      <div class="route-export-row">
+        <button class="btn-export route-export-btn" id="routeExportBtn" onclick="exportRoutesKML()" title="Exportar as rotas como arquivo KML">⬇ KML</button>
+        <button class="btn-export route-export-btn" id="routeImageBtn" onclick="exportRoutesImage()" title="Gerar imagem JPG com as rotas">🖼️ IMAGEM</button>
+      </div>
     </div>
 
     <div class="tab-content" id="tabContentMedidas">
@@ -528,6 +538,8 @@
       <button class="btn-export" id="exportAllBtn" onclick="exportAllSmart()">⬇ EXPORTAR TUDO</button>
     </div>
   </div>
+
+  <button class="mobile-view-toggle" id="mobileViewToggle" onclick="toggleMobileMapView()" type="button">🗺 Mapa</button>
 
   <div class="map-container">
     <div class="empty-map" id="emptyState">
@@ -742,27 +754,27 @@
      LOAD ORDER MATTERS. The files are numbered; keep them in this order.
      Concatenating them in this order reproduces the original program.
      =========================================================================== -->
-<script src="js/00-core.js?v=17" defer></script>
-<script src="js/01-map-core.js?v=17" defer></script>
-<script src="js/02-orientation-layers.js?v=17" defer></script>
-<script src="js/03-state.js?v=17" defer></script>
-<script src="js/04-photos.js?v=17" defer></script>
-<script src="js/05-photo-markers.js?v=17" defer></script>
-<script src="js/06-export.js?v=17" defer></script>
-<script src="js/07-map-ui.js?v=17" defer></script>
-<script src="js/08-kml.js?v=17" defer></script>
-<script src="js/09-tabs-bulk.js?v=17" defer></script>
-<script src="js/10-interactions.js?v=17" defer></script>
-<script src="js/11-photo-fixes.js?v=17" defer></script>
-<script src="js/12-search-pontos.js?v=17" defer></script>
-<script src="js/13-sorting.js?v=17" defer></script>
-<script src="js/14-tools.js?v=17" defer></script>
-<script src="js/15-routes.js?v=17" defer></script>
-<script src="js/16-medidas.js?v=17" defer></script>
-<script src="js/17-elementos.js?v=17" defer></script>
-<script src="js/18-nomes.js?v=17" defer></script>
-<script src="js/19-boot.js?v=17" defer></script>
-<script src="js/20-fotos-superiores.js?v=17" defer></script>
-<script src="js/21-municipios-br.js?v=17" defer></script>
+<script src="js/00-core.js?v=22" defer></script>
+<script src="js/01-map-core.js?v=22" defer></script>
+<script src="js/02-orientation-layers.js?v=22" defer></script>
+<script src="js/03-state.js?v=22" defer></script>
+<script src="js/04-photos.js?v=22" defer></script>
+<script src="js/05-photo-markers.js?v=22" defer></script>
+<script src="js/06-export.js?v=22" defer></script>
+<script src="js/07-map-ui.js?v=22" defer></script>
+<script src="js/08-kml.js?v=22" defer></script>
+<script src="js/09-tabs-bulk.js?v=22" defer></script>
+<script src="js/10-interactions.js?v=22" defer></script>
+<script src="js/11-photo-fixes.js?v=22" defer></script>
+<script src="js/12-search-pontos.js?v=22" defer></script>
+<script src="js/13-sorting.js?v=22" defer></script>
+<script src="js/14-tools.js?v=22" defer></script>
+<script src="js/15-routes.js?v=22" defer></script>
+<script src="js/16-medidas.js?v=22" defer></script>
+<script src="js/17-elementos.js?v=22" defer></script>
+<script src="js/18-nomes.js?v=22" defer></script>
+<script src="js/19-boot.js?v=22" defer></script>
+<script src="js/20-fotos-superiores.js?v=22" defer></script>
+<script src="js/21-municipios-br.js?v=22" defer></script>
 </body>
 </html>

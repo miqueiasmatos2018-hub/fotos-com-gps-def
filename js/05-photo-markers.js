@@ -337,9 +337,9 @@ function showDetail(photo) {
     ['Abertura', exif.FNumber ? `f/${exif.FNumber}` : '—', 'FNumber'],
     ['Velocidade do Obturador', exif.ExposureTime ? `1/${Math.round(1/exif.ExposureTime)}s` : '—', null],
     ['ISO', exif.ISO || '—', 'ISO'],
-    ['Flash', exif.Flash != null ? (exif.Flash ? 'Yes' : 'No') : '—', null],
-    ['GPS Lat', photo.lat != null ? photo.lat.toFixed(8) : 'Not available', 'lat'],
-    ['GPS Lng', photo.lng != null ? photo.lng.toFixed(8) : 'Not available', 'lng'],
+    ['Flash', exif.Flash != null ? (exif.Flash ? 'Sim' : 'Não') : '—', null],
+    ['GPS Lat', photo.lat != null ? photo.lat.toFixed(8) : '—', 'lat'],
+    ['GPS Lng', photo.lng != null ? photo.lng.toFixed(8) : '—', 'lng'],
     ['GPS Alt', toNum(exif.GPSAltitude) != null ? `${toNum(exif.GPSAltitude).toFixed(1)}m` : '—', 'GPSAltitude'],
     ['Software', exif.Software || '—', 'Software'],
   ];

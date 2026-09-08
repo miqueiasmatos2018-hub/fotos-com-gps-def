@@ -561,6 +561,11 @@
   }
   .sidebar-toggle:hover { background: rgba(212,245,60,0.15); }
   body.fullscreen-tab-active .sidebar-toggle { display: none; }
+  /* Abas Elementos/Nomes ocupam a tela toda e não usam o mapa -- MEDIR,
+     SNV e GOOGLE MAPS não fazem sentido ali. */
+  body.fullscreen-tab-active #measureBtn,
+  body.fullscreen-tab-active #snvBtn,
+  body.fullscreen-tab-active #svBtn { display: none; }
   .sidebar.minimized > *:not(.sidebar-toggle) { opacity: 0; pointer-events: none; overflow: hidden; }
   .sidebar.minimized { border-right-color: var(--border2); }
 
@@ -2116,6 +2121,18 @@
     flex-direction: column;
     background: var(--bg);
     overflow: hidden;
+    /* CORREÇÃO: sem isso, .map-overlay/.compass-rose/.rotate-controls/
+       .picking-banner/.measure-banner/.kml-drop-overlay/.dup-gps-popup/
+       .kml-progress (todos position:absolute, mas fora de #map -- são
+       irmãos dele aqui dentro de .map-container) não tinham nenhum
+       ancestral posicionado e caíam de volta para o viewport inteiro.
+       Os âncorados por "bottom" pareciam certos por coincidência (a base
+       de .map-container já coincide com a base do viewport), mas
+       .map-overlay usa "top:16px", que relativo ao viewport cai dentro
+       do header em vez de no topo do mapa -- por isso os botões MEDIR/
+       SNV/GOOGLE MAPS apareciam por cima do cabeçalho.
+    */
+    position: relative;
   }
 
   .map-search-bar {

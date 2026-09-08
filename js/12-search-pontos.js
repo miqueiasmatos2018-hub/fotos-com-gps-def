@@ -7,6 +7,17 @@
 // see the <script> tags at the bottom of index.html.
 // ==========================================================================
 
+// CORREÇÃO: precisa ficar FORA da IIFE abaixo. 01-map-core.js,
+// 09-tabs-bulk.js e 15-routes.js checam `typeof _pontoPickingHandler` como
+// variável global (mesmo padrão de _pickingForId em 05-photo-markers.js e
+// _routePickingKey em 15-routes.js) para saber se o modo "criar ponto" está
+// ativo antes de trocar de aba, reposicionar uma foto ou escolher parada de
+// rota. Enquanto isso vivia como `let` dentro da IIFE, essas checagens
+// nunca enxergavam a variável (typeof sempre "undefined"), então trocar de
+// aba com o modo "criar ponto" ligado nunca cancelava o picking -- o
+// listener de clique ficava preso no mapa.
+let _pontoPickingHandler = null;
+
 (function() {
   const input   = document.getElementById('kmlSearchInput');
   const results = document.getElementById('kmlSearchResults');
@@ -80,7 +91,6 @@
   let _customMarkers = []; // track user-created points
 
   // ─── PONTO MAP PICKING ────────────────────────────────────────────────────────
-let _pontoPickingHandler = null;
 let _pontoPickingKeyHandler = null;
 
 window.togglePontoPicking = function() {

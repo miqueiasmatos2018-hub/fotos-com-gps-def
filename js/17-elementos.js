@@ -188,11 +188,211 @@ ELEMENTOS DE TRANSIÇÃO;;;;;;;;;;;;
 Grand total: 128;;;;;;;;;;;;
 `;
 
+// Catálogo oficial SGE/DNIT de tipos de elemento (Código;Nome;Categoria) --
+// usado só para ORDENAR os grupos dentro de cada subdivisão pelo código do
+// tipo, já que o campo ID de cada elemento na planilha do projeto às vezes
+// vem em branco (nem toda linha exportada do SGE preenche ID). Ver
+// ELEMENTOS_CODE_BY_NAME logo abaixo, dentro da IIFE, que faz a busca por
+// nome -> código.
+const ELEMENTOS_CODE_CATALOG_CSV = `Código;Nome;Categoria
+2101;Pilar parede de alvenaria de pedra;Transição
+2102;Pilar parede de concreto armado;Transição
+2103;Pilar em colunas de concreto armado;Transição
+2104;Pilar vazado de concreto armado;Transição
+2105;Travessa de apoio de concreto armado;Transição
+2106;Travessa de apoio de concreto protendido;Transição
+2107;Aparelho de apoio de neoprene fretado;Transição
+2108;Aparelho de apoio de teflon;Transição
+2109;Aparelho de apoio de rolo metálico;Transição
+2110;Aparelho de apoio de placa de chumbo;Transição
+2111;Aparelho de apoio tipo 'pot bearing' Fixo;Transição
+2112;Aparelho de apoio tipo 'pot bearing' direcional;Transição
+2113;Aparelho de apoio freyssinet;Transição
+2114;Aparelho de apoio pêndulo;Transição
+2115;Articulação de aço;Transição
+2117;Reforço pilar - Encamisamento de pilar;Transição
+2118;Reforço estaca - Encamisamento de trecho livre;Transição
+2119;Aparelho de apoio oscilante;Transição
+2120;Pilar de aço;Transição
+2121;Bloco ou Sapata em alvenaria de pedra;Transição
+2122;Travessa de apoio de aço;Transição
+2201;Viga de contraventamento de pilar de concreto armado;Transição
+2202;Parede de contraventamento de pilar de concreto armado;Transição
+2203;Viga de ligação de fundações;Transição
+2204;Berço, elemento ou pilarete de nivelamento;Transição
+2301;Consolo auxiliar de concreto armado;Transição
+2302;Radier de alvenaria de pedra e de concreto armado;Transição
+3101;Encontro - Parede frontal portante de concreto armado;Transição
+3102;Encontro de alvenaria de pedra;Transição
+3103;Encontro - Parede lateral e vigas de concreto armado;Transição
+3104;Encontro - Laje de concreto armado;Transição
+3201;Cortina de concreto armado;Transição
+3202;Encontro - Cortina de concreto armado;Transição
+3203;Encontro - Paredes e vigas secundárias de concreto;Transição
+3204;Ala de concreto armado;Transição
+3205;Muro de arrimo de alvenaria de pedra;Transição
+3206;Contenção em cortina de estacas de concreto armado;Transição
+3301;Laje de transição;Transição
+3302;Aterro de acesso;Transição
+3303;Muro de arrimo de concreto;Transição
+3304;Revestimento de talude em concreto;Transição
+3305;Muro de terra armada;Transição
+3306;Muro de gabião;Transição
+3307;Defensa Metálica;Transição
+4101;Bloco ou Sapata de concreto armado;Transição
+4102;Tubulão ou estacão de concreto armado;Transição
+4103;Estaca de concreto armado;Transição
+4104;Estaca de aço;Transição
+4105;Estaca de madeira;Transição
+4106;Escada de aço;Transição
+4107;Escada - Patamar de aço;Transição
+4108;Escada de concreto armado;Transição
+4109;Escada - Patamar de concreto armado;Transição
+4201;Camisa metálica de revestimento para estaca;Transição
+1101;Laje de concreto armado;Superestrutura
+1102;Laje de concreto protendido;Superestrutura
+1103;Laje de aço ortotrópica;Superestrutura
+1104;Laje metálica de chapa corrugada;Superestrutura
+1105;Ponte em laje de concreto armado;Superestrutura
+1106;Ponte em laje de concreto protendido;Superestrutura
+1107;Laje em pranchão de madeira;Superestrutura
+1108;Viga caixão de concreto armado;Superestrutura
+1109;Viga caixão de concreto protendido;Superestrutura
+1110;Viga caixão de aço;Superestrutura
+1111;Viga I ou T de concreto armado;Superestrutura
+1112;Viga I ou T de concreto protendido;Superestrutura
+1113;Viga I de aço;Superestrutura
+1114;Dente Gerber de concreto armado;Superestrutura
+1115;Dente Gerber de concreto armado com protensão;Superestrutura
+1116;Transversina portante de concreto armado;Superestrutura
+1117;Transversina portante de concreto protendido;Superestrutura
+1118;Transversina portante de aço;Superestrutura
+1119;Dente Gerber de aço;Superestrutura
+1120;Arco de concreto armado;Superestrutura
+1121;Arco de concreto protendido;Superestrutura
+1122;Arco metálico;Superestrutura
+1123;Treliça de concreto armado;Superestrutura
+1124;Treliça de aço;Superestrutura
+1125;Estais;Superestrutura
+1126;Ancoragens de estais;Superestrutura
+1127;Reforço laje I - Sobrelaje de concreto armado;Superestrutura
+1128;Reforço laje II - Infradorso laje em concreto armado;Superestrutura
+1129;Reforço viga I - Encamisamento de viga;Superestrutura
+1130;Reforço viga II - Armadura principal passiva;Superestrutura
+1131;Reforço viga III - Cabo de protensão externo;Superestrutura
+1132;Reforço viga IV - Bloqueio de articulação Gerber;Superestrutura
+1133;Viga U de concreto armado;Superestrutura
+1134;Arco celular de concreto armado;Superestrutura
+1135;Revestimento em chapas corrugadas de aço;Superestrutura
+1136;Arco de alvenaria de pedra;Superestrutura
+1137;Banzo superior de aço de treliça vertical;Superestrutura
+1138;Banzo inferior de aço de treliça vertical;Superestrutura
+1139;Diagonal de concreto de treliça vertical;Superestrutura
+1140;Montante de aço de treliça vertical;Superestrutura
+1141;Banzo superior de concreto de treliça vertical;Superestrutura
+1142;Banzo inferior de concreto de treliça vertical;Superestrutura
+1143;Montante de concreto de treliça vertical;Superestrutura
+1145;Diagonal de aço de treliça vertical;Superestrutura
+1201;Transversina de ligação de concreto armado;Superestrutura
+1202;Transversina de ligação de concreto protendido;Superestrutura
+1203;Transversina de ligação de aço;Superestrutura
+1204;Longarina de enrijecimento de laje;Superestrutura
+1205;Viga secundária;Superestrutura
+1206;Diagonal de aço horizontal de travamento;Superestrutura
+1207;Diagonal de concreto horizontal de travamento;Superestrutura
+1208;Transversina de aço de travamento;Superestrutura
+1209;Longarina de aço de travamento;Superestrutura
+1210;Mão francesa de concreto armado;Superestrutura
+1211;Mão francesa de aço;Superestrutura
+1212;Contraventamento de aço;Superestrutura
+2101;Pilar parede de alvenaria de pedra;Apoio
+2102;Pilar parede de concreto armado;Apoio
+2103;Pilar em colunas de concreto armado;Apoio
+2104;Pilar vazado de concreto armado;Apoio
+2105;Travessa de apoio de concreto armado;Apoio
+2106;Travessa de apoio de concreto protendido;Apoio
+2107;Aparelho de apoio de neoprene fretado;Apoio
+2108;Aparelho de apoio de teflon;Apoio
+2109;Aparelho de apoio de rolo metálico;Apoio
+2110;Aparelho de apoio de placa de chumbo;Apoio
+2111;Aparelho de apoio tipo 'pot bearing' Fixo;Apoio
+2112;Aparelho de apoio tipo 'pot bearing' direcional;Apoio
+2113;Aparelho de apoio freyssinet;Apoio
+2114;Aparelho de apoio pêndulo;Apoio
+2115;Articulação de aço;Apoio
+2116;Torre de concreto armado para estaiamento;Apoio
+2117;Reforço pilar - Encamisamento de pilar;Apoio
+2118;Reforço estaca - Encamisamento de trecho livre;Apoio
+2119;Aparelho de apoio oscilante;Apoio
+2120;Pilar de aço;Apoio
+2121;Bloco ou Sapata em alvenaria de pedra;Apoio
+2122;Travessa de apoio de aço;Apoio
+2201;Viga de contraventamento de pilar de concreto armado;Apoio
+2202;Parede de contraventamento de pilar de concreto armado;Apoio
+2203;Viga de ligação de fundações;Apoio
+2204;Berço, elemento ou pilarete de nivelamento;Apoio
+2301;Consolo auxiliar de concreto armado;Apoio
+2302;Radier de alvenaria de pedra e de concreto armado;Apoio
+4101;Bloco ou Sapata de concreto armado;Apoio
+4102;Tubulão ou estacão de concreto armado;Apoio
+4103;Estaca de concreto armado;Apoio
+4104;Estaca de aço;Apoio
+4105;Estaca de madeira;Apoio
+4106;Escada de aço;Apoio
+4107;Escada - Patamar de aço;Apoio
+4108;Escada de concreto armado;Apoio
+4109;Escada - Patamar de concreto armado;Apoio
+4201;Camisa metálica de revestimento para estaca;Apoio
+1301;Tela de aço;Complementar
+5301;Pavimento asfáltico;Complementar
+5302;Pavimento de concreto;Complementar
+5303;Barreira New Jersey;Complementar
+5304;Guarda rodas antigo do DNER;Complementar
+5305;Guarda rodas qualquer;Complementar
+5306;Guarda corpo de concreto armado;Complementar
+5307;Guarda corpo de aço;Complementar
+5308;Calçada para pedestres de concreto armado;Complementar
+5309;Calçada para pedestres metálica;Complementar
+5310;Berço para junta de dilatação;Complementar
+5311;Junta elastomérica de dilatação;Complementar
+5312;Junta de dilatação;Complementar
+5313;Junta metálica de dilatação;Complementar
+5314;Guarda corpo misto (concreto armado e de aço);Complementar
+5315;Barreira qualquer de concreto armado;Complementar
+5316;Barreira New Jersey com guarda-corpo de concreto armado;Complementar
+5317;Buzinote de aço ou PVC;Complementar
+5318;Cobertura para pedestres;Complementar`;
+
 (function(){
 
   "use strict";
 
   var state = { rows: [], headerMap: {}, dimCols: [], contextCols: [], allExpanded: false, copiedKeys: {} };
+
+  // ---------- catálogo SGE (nome do tipo -> código oficial) ----------
+  // Construído uma vez a partir de ELEMENTOS_CODE_CATALOG_CSV (topo do
+  // arquivo). Algumas linhas do catálogo repetem o mesmo nome em duas
+  // categorias (ex.: "Pilar de aço" existe em Transição E em Apoio) com o
+  // MESMO código -- por isso um mapa nome->código simplesmente sobrescreve
+  // com o mesmo valor, sem gerar ambiguidade.
+  var ELEMENTOS_CODE_BY_NAME = (function(){
+    var map = {};
+    var lines = (ELEMENTOS_CODE_CATALOG_CSV || '').split('\n');
+    for (var i = 1; i < lines.length; i++){ // pula o cabeçalho
+      var line = lines[i].trim();
+      if (!line) continue;
+      var cells = line.split(';');
+      var code = parseInt(cells[0], 10);
+      var nome = (cells[1] || '').trim().toUpperCase();
+      if (nome && !isNaN(code)) map[nome] = code;
+    }
+    return map;
+  })();
+
+  function catalogCode(nome){
+    var key = (nome || '').trim().toUpperCase();
+    return Object.prototype.hasOwnProperty.call(ELEMENTOS_CODE_BY_NAME, key) ? ELEMENTOS_CODE_BY_NAME[key] : null;
+  }
 
   // ---------- CSV parsing ----------
   function stripBOM(text){ return text.charCodeAt(0) === 0xFEFF ? text.slice(1) : text; }
@@ -329,7 +529,59 @@ Grand total: 128;;;;;;;;;;;;
     if (rows.some(function(r){return r.__categoria!=='';})) contextCols.push('__categoria');
     if (idx.transicao!==-1 && rows.some(function(r){return r.transicao!=='';})) contextCols.push('transicao');
 
+    rows = addDefaultElements(rows);
+
     return { rows: rows, dimCols: dimCols, contextCols: contextCols };
+  }
+
+  // ---------- elementos padrão (preenchidos automaticamente quando faltam) ----------
+  // Alguns tipos quase sempre existem na obra mas às vezes saem de fora da
+  // exportação do SGE -- em vez de a pessoa ter que lembrar de criar essas
+  // linhas na mão, a ferramenta adiciona um card em branco (só com o tipo
+  // certo, pronto pra preencher/copiar as medidas depois) sempre que a
+  // seção correspondente (TRANSIÇÃO ou COMPLEMENTAR) já existe nos dados
+  // mas esse elemento específico não aparece nela. Se o elemento já vier
+  // no CSV, nada é adicionado -- os dados reais sempre têm prioridade.
+  var DEFAULT_ELEMENTS = [
+    // "por transição": uma cópia para cada seção TRANSIÇÃO que já exista
+    // nos dados (uma obra de 2 tramos com transição em cada ponta gera 2
+    // dessas, uma por transição -- não uma vez só pra obra toda).
+    { code: 3302, nome: 'Aterro de acesso',   scope: 'transicao',    qty: 1 },
+    { code: 3307, nome: 'Defensa Metálica',   scope: 'transicao',    qty: 2 },
+    // Junta de dilatação é COMPLEMENTAR, não por transição -- 2 unidades
+    // por seção Complementares que já exista nos dados.
+    { code: 5312, nome: 'Junta de dilatação', scope: 'complementar', qty: 2 }
+  ];
+
+  function addDefaultElements(rows){
+    // Agrupa as linhas reais por (tramo, categoria, transição) pra achar
+    // quais seções TRANSIÇÃO/COMPLEMENTAR já existem nos dados, e o que já
+    // está preenchido em cada uma.
+    var seen = {};
+    rows.forEach(function(r){
+      var key = r.__tramo + '␟' + r.__categoria + '␟' + (r.transicao||'');
+      if (!seen[key]) seen[key] = { tramo:r.__tramo, categoria:r.__categoria, transicao:r.transicao||'', names:{} };
+      seen[key].names[(r.nome||'').trim().toUpperCase()] = true;
+    });
+
+    var extra = [];
+    Object.keys(seen).forEach(function(key){
+      var g = seen[key];
+      var isTransicao   = /TRANSI/i.test(g.categoria) || /TRANSI/i.test(g.tramo);
+      var isComplementar = /COMPLEMENTAR/i.test(g.categoria) || /COMPLEMENTAR/i.test(g.tramo);
+      DEFAULT_ELEMENTS.forEach(function(def){
+        if (def.scope === 'transicao' && !isTransicao) return;
+        if (def.scope === 'complementar' && !isComplementar) return;
+        if (g.names[def.nome.toUpperCase()]) return; // já existe -- não duplica
+        for (var i=0; i<def.qty; i++){
+          extra.push({
+            __tramo: g.tramo, __categoria: g.categoria, __dims: {},
+            id: String(def.code), codigo: '', nome: def.nome, transicao: g.transicao
+          });
+        }
+      });
+    });
+    return rows.concat(extra);
   }
 
   var COL_LABELS = { codigo:'CÓDIGO', __tramo:'TRAMO', __categoria:'CATEGORIA', transicao:'TRANSIÇÃO' };
@@ -374,11 +626,25 @@ Grand total: 128;;;;;;;;;;;;
       map[key].rows.push(r);
     });
     var groups = order.map(function(k){ return map[k]; });
-    // Ordem crescente por ID dentro de cada subdivisão (categoria); nome só
-    // desempata no caso raro de dois grupos com o mesmo ID.
+    // Ordem crescente dentro de cada subdivisão (categoria): primeiro pelo
+    // código oficial do catálogo SGE (busca pelo nome do tipo) -- é isso
+    // que resolve o caso de a planilha do projeto não ter ID preenchido
+    // para todo elemento. Só cai para o ID da própria planilha quando o
+    // nome não está no catálogo (tipo fora do padrão) ou os dois lados
+    // têm o mesmo código.
     groups.sort(function(a,b){
-      var c = a.id.localeCompare(b.id, 'pt-BR', {numeric:true});
-      if (c!==0) return c;
+      var ca = catalogCode(a.nome), cb = catalogCode(b.nome);
+      if (ca != null && cb != null && ca !== cb) return ca - cb;
+      if (ca != null && cb == null) return -1;
+      if (ca == null && cb != null) return 1;
+      if (a.id && b.id){
+        var c = a.id.localeCompare(b.id, 'pt-BR', {numeric:true});
+        if (c !== 0) return c;
+      } else if (a.id && !b.id){
+        return -1;
+      } else if (!a.id && b.id){
+        return 1;
+      }
       return a.nome.localeCompare(b.nome, 'pt-BR');
     });
     return groups;

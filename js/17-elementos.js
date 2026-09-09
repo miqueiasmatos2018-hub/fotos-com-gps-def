@@ -529,7 +529,7 @@ const ELEMENTOS_CODE_CATALOG_CSV = `Código;Nome;Categoria
     if (rows.some(function(r){return r.__categoria!=='';})) contextCols.push('__categoria');
     if (idx.transicao!==-1 && rows.some(function(r){return r.transicao!=='';})) contextCols.push('transicao');
 
-    rows = addDefaultElements(rows);
+    rows = addDefaultElements(rows, dimCols);
 
     return { rows: rows, dimCols: dimCols, contextCols: contextCols };
   }
@@ -553,7 +553,7 @@ const ELEMENTOS_CODE_CATALOG_CSV = `Código;Nome;Categoria
     { code: 5312, nome: 'Junta de dilatação', scope: 'complementar', qty: 2 }
   ];
 
-  function addDefaultElements(rows){
+  function addDefaultElements(rows, dimCols){
     // Agrupa as linhas reais por (tramo, categoria, transição) pra achar
     // quais seções TRANSIÇÃO/COMPLEMENTAR já existem nos dados, e o que já
     // está preenchido em cada uma.
@@ -574,8 +574,12 @@ const ELEMENTOS_CODE_CATALOG_CSV = `Código;Nome;Categoria
         if (def.scope === 'complementar' && !isComplementar) return;
         if (g.names[def.nome.toUpperCase()]) return; // já existe -- não duplica
         for (var i=0; i<def.qty; i++){
+          // Todas as medidas desses elementos padrão saem como "0" (em vez
+          // de em branco) -- é o valor que a pessoa pediu para eles.
+          var dims = {};
+          (dimCols||[]).forEach(function(col){ dims[col] = '0'; });
           extra.push({
-            __tramo: g.tramo, __categoria: g.categoria, __dims: {},
+            __tramo: g.tramo, __categoria: g.categoria, __dims: dims,
             id: String(def.code), codigo: '', nome: def.nome, transicao: g.transicao
           });
         }

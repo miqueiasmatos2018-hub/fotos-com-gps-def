@@ -1070,7 +1070,7 @@
   }
   .elem-g-head:hover { background: rgba(255,255,255,0.02); }
   .elem-g-title { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
-  .elem-g-name { font-size: 12px; font-weight: 700; color: #ffffff; }
+  .elem-g-name { font-size: 12px; font-weight: 700; color: #ffffff; text-transform: uppercase; }
   .elem-g-id {
     font-family: var(--mono); font-size: 9px; color: var(--accent);
     border: 1px solid var(--border2); padding: 2px 6px; border-radius: 4px;

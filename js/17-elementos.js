@@ -374,10 +374,12 @@ Grand total: 128;;;;;;;;;;;;
       map[key].rows.push(r);
     });
     var groups = order.map(function(k){ return map[k]; });
+    // Ordem crescente por ID dentro de cada subdivisão (categoria); nome só
+    // desempata no caso raro de dois grupos com o mesmo ID.
     groups.sort(function(a,b){
-      var c = a.nome.localeCompare(b.nome, 'pt-BR');
+      var c = a.id.localeCompare(b.id, 'pt-BR', {numeric:true});
       if (c!==0) return c;
-      return a.id.localeCompare(b.id, 'pt-BR', {numeric:true});
+      return a.nome.localeCompare(b.nome, 'pt-BR');
     });
     return groups;
   }

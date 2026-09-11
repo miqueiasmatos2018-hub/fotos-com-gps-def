@@ -36,6 +36,25 @@ let _pontoPickingHandler = null;
 
   window.invalidateKmlSearchIndex = function() { _featureIndex = null; };
 
+  // Usado pela aba Inspeções (23-inspecoes.js) para achar a coordenada de
+  // um código de OAE digitado ali. Prioriza um match exato no código (OAE,
+  // SGO ou nome) sobre um match parcial, igual à barra de busca já faz.
+  window.findKmlFeatureByCode = function(code) {
+    const q = String(code == null ? '' : code).trim().toLowerCase();
+    if (!q) return null;
+    const features = getAllKmlFeatures();
+    const qPadded = /^\d+$/.test(q) ? q.padStart(6, '0') : null;
+    let partial = null;
+    for (const f of features) {
+      const oae = (f.oae || '').toLowerCase();
+      const sgo = (f.sgo || '').toLowerCase();
+      const name = (f.name || '').toLowerCase();
+      if (oae === q || sgo === q || name === q || (qPadded && sgo === qPadded)) return f;
+      if (!partial && (f.haystack.includes(q) || (qPadded && f.haystack.includes(qPadded)))) partial = f;
+    }
+    return partial;
+  };
+
   function getAllKmlFeatures() {
     if (_featureIndex) return _featureIndex;
     const features = [];

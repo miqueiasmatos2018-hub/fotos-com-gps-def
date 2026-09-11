@@ -38,12 +38,16 @@ window.switchTab = function(tab) {
   if (typeof _setGpxLayerVisible === 'function') {
     _setGpxLayerVisible(tab === 'gpx');
   }
+  // Same idea for the Inspeções teams/routes preview.
+  if (typeof _setInspLayerVisible === 'function') {
+    _setInspLayerVisible(tab === 'inspecoes');
+  }
   // Elementos/Nomes cover the whole screen and don't use the sidebar, so
   // floating sidebar controls (like the collapse toggle) that sit at a
   // higher z-index than the overlay would otherwise poke through on top
   // of it -- this class lets CSS hide them specifically for these tabs.
   document.body.classList.toggle('fullscreen-tab-active', tab === 'elementos' || tab === 'nomes');
-  ['photos','pontos','rotas','medidas','elementos','nomes','gpx'].forEach(t => {
+  ['photos','pontos','rotas','medidas','elementos','nomes','gpx','inspecoes'].forEach(t => {
     const btn = document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1));
     const content = document.getElementById('tabContent' + t.charAt(0).toUpperCase() + t.slice(1));
     if (btn)     btn.classList.toggle('active',     t === tab);

@@ -12,7 +12,7 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.css"/>
-<link rel="stylesheet" href="styles.css?v=31">
+<link rel="stylesheet" href="styles.css?v=33">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js" defer></script>
 <script src="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.js" defer></script>
@@ -66,6 +66,7 @@
     <button class="top-tab-btn" id="tabElementos" onclick="switchTab('elementos')"><span class="top-tab-icon">🧱</span>Elementos</button>
     <button class="top-tab-btn" id="tabNomes" onclick="switchTab('nomes')"><span class="top-tab-icon">🏷</span>Nomes</button>
     <button class="top-tab-btn" id="tabGpx" onclick="switchTab('gpx')"><span class="top-tab-icon">🛰</span>GPX</button>
+    <button class="top-tab-btn" id="tabInspecoes" onclick="switchTab('inspecoes')"><span class="top-tab-icon">👷</span>Inspeções</button>
   </nav>
   <div class="header-right">
     <div class="header-tab-anim" id="headerTabAnim" aria-hidden="true">
@@ -585,6 +586,22 @@
       </div>
     </div>
 
+    <div class="tab-content" id="tabContentInspecoes">
+      <p style="font-size:10.5px;color:var(--text2);margin:0 0 10px;">
+        Monta a rota de cada equipe pelos códigos das OAEs (busca nas camadas
+        KML já carregadas no mapa) — cada código vira uma parada, na ordem em
+        que for adicionado. Arraste ou use as setas pra reordenar.
+      </p>
+
+      <div id="inspTeamsList"></div>
+      <button class="elem-btn primary" id="inspAddTeamBtn" type="button" style="width:100%;">+ Nova equipe</button>
+
+      <div class="insp-export-row">
+        <button class="btn-export" id="inspExportSelectedBtn" type="button" title="Baixar KML só da equipe selecionada">⬇ KML EQUIPE</button>
+        <button class="btn-export" id="inspExportAllBtn" type="button" title="Baixar KML de todas as equipes">⬇ KML TODAS</button>
+      </div>
+    </div>
+
     <div class="export-bar" id="exportBar">
       <button class="btn-export-single" id="exportSelectedBtn" onclick="exportSelectedPhotos()" style="display:none;" title="Baixar as fotos marcadas com a caixinha">⬇ BAIXAR SELECIONADAS (<span id="selectedPhotosCount">0</span>)</button>
       <button class="btn-export" id="exportAllBtn" onclick="exportAllSmart()">⬇ EXPORTAR TUDO</button>
@@ -806,28 +823,29 @@
      LOAD ORDER MATTERS. The files are numbered; keep them in this order.
      Concatenating them in this order reproduces the original program.
      =========================================================================== -->
-<script src="js/00-core.js?v=31" defer></script>
-<script src="js/01-map-core.js?v=31" defer></script>
-<script src="js/02-orientation-layers.js?v=31" defer></script>
-<script src="js/03-state.js?v=31" defer></script>
-<script src="js/04-photos.js?v=31" defer></script>
-<script src="js/05-photo-markers.js?v=31" defer></script>
-<script src="js/06-export.js?v=31" defer></script>
-<script src="js/07-map-ui.js?v=31" defer></script>
-<script src="js/08-kml.js?v=31" defer></script>
-<script src="js/09-tabs-bulk.js?v=31" defer></script>
-<script src="js/10-interactions.js?v=31" defer></script>
-<script src="js/11-photo-fixes.js?v=31" defer></script>
-<script src="js/12-search-pontos.js?v=31" defer></script>
-<script src="js/13-sorting.js?v=31" defer></script>
-<script src="js/14-tools.js?v=31" defer></script>
-<script src="js/15-routes.js?v=31" defer></script>
-<script src="js/16-medidas.js?v=31" defer></script>
-<script src="js/17-elementos.js?v=31" defer></script>
-<script src="js/18-nomes.js?v=31" defer></script>
-<script src="js/19-boot.js?v=31" defer></script>
-<script src="js/20-fotos-superiores.js?v=31" defer></script>
-<script src="js/21-municipios-br.js?v=31" defer></script>
-<script src="js/22-gpx.js?v=31" defer></script>
+<script src="js/00-core.js?v=33" defer></script>
+<script src="js/01-map-core.js?v=33" defer></script>
+<script src="js/02-orientation-layers.js?v=33" defer></script>
+<script src="js/03-state.js?v=33" defer></script>
+<script src="js/04-photos.js?v=33" defer></script>
+<script src="js/05-photo-markers.js?v=33" defer></script>
+<script src="js/06-export.js?v=33" defer></script>
+<script src="js/07-map-ui.js?v=33" defer></script>
+<script src="js/08-kml.js?v=33" defer></script>
+<script src="js/09-tabs-bulk.js?v=33" defer></script>
+<script src="js/10-interactions.js?v=33" defer></script>
+<script src="js/11-photo-fixes.js?v=33" defer></script>
+<script src="js/12-search-pontos.js?v=33" defer></script>
+<script src="js/13-sorting.js?v=33" defer></script>
+<script src="js/14-tools.js?v=33" defer></script>
+<script src="js/15-routes.js?v=33" defer></script>
+<script src="js/16-medidas.js?v=33" defer></script>
+<script src="js/17-elementos.js?v=33" defer></script>
+<script src="js/18-nomes.js?v=33" defer></script>
+<script src="js/19-boot.js?v=33" defer></script>
+<script src="js/20-fotos-superiores.js?v=33" defer></script>
+<script src="js/21-municipios-br.js?v=33" defer></script>
+<script src="js/22-gpx.js?v=33" defer></script>
+<script src="js/23-inspecoes.js?v=33" defer></script>
 </body>
 </html>

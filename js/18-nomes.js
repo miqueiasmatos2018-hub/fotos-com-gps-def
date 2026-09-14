@@ -512,6 +512,51 @@
     });
   }
 
+  // ---------- exportar legendas (Fotos Superiores + Fotos Inferiores) ----------
+  // "Legenda" = o texto que cada badge/ponto gera. Entram as que já foram
+  // "criadas": nas Superiores, as 11 já existem assim que a aba carrega
+  // (não dependem de ter sido copiadas -- copiar é só uma ação sobre uma
+  // legenda que já existia); nas Inferiores, "criada" é ter sido clicada
+  // (já é assim que `filled` funciona -- pontos nunca clicados não geram
+  // nada). O número de cada linha é o mesmo já mostrado na tela: 01-11
+  // fixo nas Superiores, posição + numeração inicial nas Inferiores.
+  function csvEscapeField(v){
+    var s = String(v == null ? '' : v);
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }
+
+  function exportGeneratedNamesCSV(){
+    var rows = [];
+
+    STATIC_NAMES.forEach(function(text, idx){
+      rows.push({ num: idx + 1, legenda: text });
+    });
+    filled.forEach(function(f, i){
+      rows.push({ num: i + startNumber, legenda: buildInfName(f.letter, f.tramo, tramoCount) });
+    });
+
+    if (!rows.length){
+      showToast('⚠ Nenhuma legenda criada ainda para exportar');
+      return;
+    }
+
+    rows.sort(function(a, b){ return a.num - b.num; });
+
+    var lines = ['Número,Legenda'];
+    rows.forEach(function(r){ lines.push(r.num + ',' + csvEscapeField(r.legenda)); });
+
+    // BOM no início -- sem ele o Excel abre acentos/ç quebrados em CSV UTF-8.
+    var csv = '\uFEFF' + lines.join('\r\n');
+    var blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    triggerDownload(blob, 'legendas_nomes.csv');
+    showToast('✓ <span class="accent">' + rows.length + ' legenda(s)</span> exportada(s) para CSV');
+  }
+
+  var btnExportCsv = document.getElementById('nomesBtnExportCsv');
+  if (btnExportCsv){
+    btnExportCsv.addEventListener('click', exportGeneratedNamesCSV);
+  }
+
   renderStatic();
   renderAll();
 

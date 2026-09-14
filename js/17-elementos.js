@@ -691,7 +691,14 @@ const ELEMENTOS_CODE_CATALOG_CSV = `Código;Nome;Categoria
     return ordered;
   }
 
+  // A hierarquia (agrupamento por tramo/categoria/tipo) só depende de
+  // state.rows, não da busca -- mas render() era chamado a cada tecla
+  // digitada em #elemSearch, e recalculava tudo do zero (incluindo o
+  // agrupamento de milhares de linhas) só para aplicar um filtro de texto.
+  // Cacheia o resultado e só invalida quando um novo CSV é carregado.
+  var _hierarchyCache = null;
   function buildHierarchy(){
+    if (_hierarchyCache) return _hierarchyCache;
     var tramoMap = {}, tramoOrder = [];
     state.rows.forEach(function(r){
       var tramo = r.__tramo || '(sem tramo)';
@@ -717,7 +724,7 @@ const ELEMENTOS_CODE_CATALOG_CSV = `Código;Nome;Categoria
       if (/^TRAMO\b/i.test(sections[i].label)){ lastTramoIdx = i; break; }
     }
 
-    return sections.map(function(sec, secIdx){
+    _hierarchyCache = sections.map(function(sec, secIdx){
       var isTramoSection = /^TRAMO\b/i.test(sec.label);
       // obras de 1 tramo não têm apoio e têm transição no início e no fim: ordem fixa
       // complementares > transição inicial > superestrutura > transição final.
@@ -745,6 +752,7 @@ const ELEMENTOS_CODE_CATALOG_CSV = `Código;Nome;Categoria
         categories: cats.map(function(c){ return { label:c.label, tag:c.tag, groups: groupRows(c.rows) }; })
       };
     });
+    return _hierarchyCache;
   }
 
   // ---------- rendering ----------
@@ -962,6 +970,7 @@ const ELEMENTOS_CODE_CATALOG_CSV = `Código;Nome;Categoria
   // ---------- loading ----------
   function loadCSVText(text, filename){
     var parsed = parseCSV(text);
+    _hierarchyCache = null; // novo arquivo -- descarta o agrupamento anterior
     state.rows = parsed.rows;
     state.dimCols = parsed.dimCols;
     state.contextCols = parsed.contextCols;
@@ -1026,7 +1035,10 @@ const ELEMENTOS_CODE_CATALOG_CSV = `Código;Nome;Categoria
     loadCSVText(sample, 'ELEMENTOS_SGE_EXPORTAR.csv (exemplo)');
   });
 
-  document.getElementById('elemSearch').addEventListener('input', render);
+  // Debounce: cada tecla digitada reconstrói toda a árvore de grupos
+  // (createElement por card) -- em bases grandes isso engasgava a digitação.
+  // Mesmo helper já usado em 12-search-pontos.js.
+  document.getElementById('elemSearch').addEventListener('input', debounce(render, 120));
   document.getElementById('elemBtnToggleAll').addEventListener('click', function(){
     state.allExpanded = !state.allExpanded;
     this.textContent = state.allExpanded ? 'Recolher tudo' : 'Expandir tudo';

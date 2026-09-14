@@ -51,6 +51,67 @@ function triggerDownload(blob, filename) {
   }, 2000);
 }
 
+// ─── EXPORTAR LEGENDAS EM CSV (fotos principais + Fotos Superiores) ──────
+// Esse app ainda não tem um campo "legenda" separado por foto -- o texto
+// mais próximo disso é o próprio nome de cada foto (o mesmo que aparece na
+// lista e que dá pra editar no botão ✎), então é ele que vira a legenda
+// aqui. O número de cada linha sai da primeira sequência de dígitos
+// encontrada nesse nome ("01 - LONGARINA" -> 1, "F-05" -> 5); fotos cujo
+// nome não tem nenhum número vão para o final da lista, com a coluna
+// Número em branco (mas continuam aparecendo no CSV).
+function _captionNumber(text) {
+  const m = /(\d+)/.exec(text || '');
+  return m ? parseInt(m[1], 10) : null;
+}
+
+function _csvEscapeField(value) {
+  const s = String(value == null ? '' : value);
+  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+
+function exportPhotoCaptionsCSV() {
+  const rows = [];
+
+  photos.forEach(p => rows.push({ num: _captionNumber(p.name), legenda: p.name }));
+
+  // Fotos Superiores (20-fotos-superiores.js) é uma sessão à parte, fora
+  // da lista principal -- só entram as que já foram numeradas (clicou no
+  // pino no mapa), com a legenda F-01, F-02... que esse módulo já usa.
+  if (typeof _fsupSession !== 'undefined' && _fsupSession && Array.isArray(_fsupSession.items)) {
+    _fsupSession.items
+      .filter(it => it.order != null)
+      .forEach(it => {
+        const legenda = _fsupLabelFor(it.order);
+        rows.push({ num: _captionNumber(legenda), legenda });
+      });
+  }
+
+  if (!rows.length) {
+    showToast('⚠ Nenhuma foto com legenda para exportar ainda');
+    return;
+  }
+
+  // Ordem crescente pelo número; quando não dá pra achar um número, a
+  // linha vai pro final (mantendo entre si a ordem em que apareceram, em
+  // vez de embaralhar).
+  rows.forEach((r, i) => { r._i = i; });
+  rows.sort((a, b) => {
+    if (a.num == null && b.num == null) return a._i - b._i;
+    if (a.num == null) return 1;
+    if (b.num == null) return -1;
+    return a.num - b.num || a._i - b._i;
+  });
+
+  const lines = ['Número,Legenda'];
+  rows.forEach(r => lines.push(`${r.num != null ? r.num : ''},${_csvEscapeField(r.legenda)}`));
+
+  // BOM no início -- sem ele o Excel abre acentos/ç quebrados em CSV UTF-8.
+  const csv = '\uFEFF' + lines.join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  triggerDownload(blob, 'legendas_fotos.csv');
+  showToast(`✓ <span class="accent">${rows.length} legenda(s)</span> exportada(s) para CSV`);
+}
+
 // Graus decimais -> [grau, minuto, segundo] racionais para o piexif.
 // O denominador dos segundos era 100 (≈0,3 m de resolução); com 10000 o
 // erro de arredondamento vira alguns milímetros, o que importa quando a

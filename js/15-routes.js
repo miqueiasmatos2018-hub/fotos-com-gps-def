@@ -2007,7 +2007,7 @@ window.exportRoutesImage = async function() {
   // (ou um erro no meio) faziam o botão ficar preso em "GERANDO IMAGEM…".
   const originalLabel = btn ? (btn.dataset.label || btn.textContent) : null;
   if (btn) btn.dataset.label = originalLabel;
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ GERANDO IMAGEM…'; }
+  if (btn) setButtonLoading(btn, 'GERANDO IMAGEM…');
   showToast('🛰️ Buscando imagem de satélite…');
 
   try {
@@ -2209,7 +2209,7 @@ window.exportRoutesImage = async function() {
     console.error('Falha ao gerar imagem da rota:', err);
     showToast(`⚠ Não foi possível gerar a imagem — ${err && err.message ? err.message : 'erro desconhecido'} (veja o console para detalhes)`);
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = originalLabel; }
+    if (btn) clearButtonLoading(btn, originalLabel);
   }
 };
 

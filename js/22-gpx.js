@@ -163,13 +163,13 @@ async function _gpxProcess() {
   const offsetInput = document.getElementById('gpxOffsetInput');
   const offsetHours = parseFloat(offsetInput && offsetInput.value) || 0;
 
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ PROCESSANDO…'; }
+  if (btn) setButtonLoading(btn, 'PROCESSANDO…');
   try {
     _gpxTrackPoints = await _gpxParseTrackFile(_gpxTrackFile);
   } catch (err) {
     console.error('Leitura do GPX falhou:', err);
     showToast(`⚠️ ${err.message || 'Não foi possível ler o GPX'}`);
-    if (btn) { btn.disabled = false; btn.textContent = '📍 Processar'; }
+    if (btn) clearButtonLoading(btn, '📍 Processar');
     return;
   }
 
@@ -204,7 +204,7 @@ async function _gpxProcess() {
   _gpxRenderResults();
   _gpxRenderMapPreview();
 
-  if (btn) { btn.disabled = false; btn.textContent = '📍 Processar'; }
+  if (btn) clearButtonLoading(btn, '📍 Processar');
   const matched = items.filter(i => i.status === 'ok' || i.status === 'extrapolated').length;
   showToast(`📍 <span class="accent">${matched} de ${items.length}</span> fotos geocodificadas`);
 }
@@ -255,7 +255,7 @@ async function _gpxDownloadAll() {
   const items = (_gpxResultItems || []).filter(i => i.lat != null);
   if (!items.length) return;
   const btn = document.getElementById('gpxDownloadBtn');
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ SALVANDO…'; }
+  if (btn) setButtonLoading(btn, 'SALVANDO…');
 
   function buildPhotoLike(item) {
     return {
@@ -277,7 +277,7 @@ async function _gpxDownloadAll() {
       });
     } catch (e) {
       if (e && e.name === 'AbortError') {
-        if (btn) { btn.disabled = false; btn.textContent = '⬇ BAIXAR FOTOS COM GPS'; }
+        if (btn) clearButtonLoading(btn, '⬇ BAIXAR FOTOS COM GPS');
         return;
       }
       dirHandle = null; // sem permissão / API indisponível -> cai no download solto
@@ -304,7 +304,7 @@ async function _gpxDownloadAll() {
         showToast(errors
           ? `✓ ${items.length - errors} fotos salvas na pasta (${errors} com erro)`
           : `✓ <span class="accent">${items.length} fotos</span> salvas na pasta "fotos com gps"`);
-        if (btn) { btn.disabled = false; btn.textContent = '⬇ BAIXAR FOTOS COM GPS'; }
+        if (btn) clearButtonLoading(btn, '⬇ BAIXAR FOTOS COM GPS');
         return;
       } catch (err) {
         console.error('Exportação de fotos GPX para pasta falhou, caindo para download solto:', err);
@@ -327,7 +327,7 @@ async function _gpxDownloadAll() {
     console.error('Download das fotos geocodificadas falhou:', err);
     showToast('⚠ Não foi possível baixar todas as fotos');
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = '⬇ BAIXAR FOTOS COM GPS'; }
+    if (btn) clearButtonLoading(btn, '⬇ BAIXAR FOTOS COM GPS');
   }
 }
 

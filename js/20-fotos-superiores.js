@@ -139,7 +139,7 @@ function _fsupRenderStatus() {
 // (sem canvas/piexif) preserva os bytes exatamente como vieram da câmera.
 async function _fsupDownloadPhotos(assignedItems) {
   const btn = document.getElementById('fsupDownloadBtn');
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ SALVANDO…'; }
+  if (btn) setButtonLoading(btn, 'SALVANDO…');
 
   if (window.showDirectoryPicker) {
     let dirHandle;
@@ -153,7 +153,7 @@ async function _fsupDownloadPhotos(assignedItems) {
       if (e && e.name === 'AbortError') {
         // A pessoa cancelou o seletor de pasta -- não cai para download
         // solto nesse caso, só desfaz o estado "salvando" do botão.
-        if (btn) { btn.disabled = false; btn.textContent = '⬇ BAIXAR RENOMEADAS'; }
+        if (btn) clearButtonLoading(btn, '⬇ BAIXAR RENOMEADAS');
         return;
       }
       dirHandle = null; // sem permissão / API indisponível -> cai no download solto
@@ -179,7 +179,7 @@ async function _fsupDownloadPhotos(assignedItems) {
         showToast(errors
           ? `✓ ${assignedItems.length - errors} fotos salvas na pasta (${errors} com erro)`
           : `✓ <span class="accent">${assignedItems.length} fotos</span> salvas na pasta "fotos superiores"`);
-        if (btn) { btn.disabled = false; btn.textContent = '⬇ BAIXAR RENOMEADAS'; }
+        if (btn) clearButtonLoading(btn, '⬇ BAIXAR RENOMEADAS');
         return;
       } catch (err) {
         console.error('Exportação de fotos superiores para pasta falhou, caindo para download solto:', err);
@@ -203,7 +203,7 @@ async function _fsupDownloadPhotos(assignedItems) {
     console.error('Download das fotos superiores falhou:', e);
     showToast('⚠ Não foi possível baixar as fotos');
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = '⬇ BAIXAR RENOMEADAS'; }
+    if (btn) clearButtonLoading(btn, '⬇ BAIXAR RENOMEADAS');
   }
 }
 

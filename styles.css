@@ -95,9 +95,27 @@
   .logo-bridge .bridge-car-2 { animation-delay: -1.6s; animation-duration: 2.6s; }
   .logo-bridge .bridge-car-3 { animation-delay: -0.8s; animation-duration: 3.8s; }
 
+  /* Rastro: mesmo trajeto de cada carro, um pouco "atrás" no tempo (delay
+     levemente maior = posição mais cedo no caminho num dado instante) e
+     bem mais transparente/menor -- sugere velocidade sem SVG extra pesado. */
+  .logo-bridge .bridge-car-trail rect { fill: currentColor; }
+  .logo-bridge .bridge-car-trail { animation: bridge-car-pass 3.2s linear infinite; opacity: 0.28; transform-origin: center; }
+  .logo-bridge .bridge-car-trail rect { transform: scale(0.75); transform-box: fill-box; transform-origin: center; }
+  .logo-bridge .bridge-car-1-trail { color: var(--accent);  animation-delay: 0.15s; }
+  .logo-bridge .bridge-car-2-trail { color: var(--accent2); animation-delay: -1.45s; animation-duration: 2.6s; }
+  .logo-bridge .bridge-car-3-trail { color: #4dffef;        animation-delay: -0.65s; animation-duration: 3.8s; }
+
   @keyframes bridge-car-pass {
     0%   { transform: translateX(-10px); }
     100% { transform: translateX(126px); }
+  }
+
+  /* Cabos "respirando" -- um brilho de tensão bem sutil, para o desenho
+     estático dos cabos não parecer congelado ao lado do tráfego. */
+  .logo-bridge .bridge-cable { animation: bridge-cable-breathe 3.6s ease-in-out infinite; }
+  @keyframes bridge-cable-breathe {
+    0%, 100% { stroke-opacity: 1; }
+    50%      { stroke-opacity: 0.55; }
   }
 
   /* Drone hovering back and forth above the bridge deck. */
@@ -334,6 +352,12 @@
   .tab-anim-rotas .car-roofline   { fill: rgba(0,0,0,0.3); }
   .tab-anim-rotas .car-light      { fill: #fff8d6; }
 
+  /* Rastro de velocidade: mesma silhueta simplificada (só a carroceria),
+     bem mais apagada e sem os detalhes do carro principal. */
+  .tab-anim-rotas .route-car-trail .car-body { fill: var(--accent); }
+  .tab-anim-rotas .route-car-trail-1 { opacity: 0.35; }
+  .tab-anim-rotas .route-car-trail-2 { opacity: 0.15; }
+
   /* Dados: monitor "typing" lines of text */
   .tab-anim-medidas .monitor-frame  { fill: var(--panel); stroke: var(--text2); stroke-width: 1.2; }
   .tab-anim-medidas .monitor-screen { fill: #060606; }
@@ -437,6 +461,25 @@
     0%, 88%   { opacity: 0; transform: translateY(2px) scaleY(0.3); }
     94%, 98%  { opacity: 1; transform: translateY(0) scaleY(1); }
     100%      { opacity: 0; transform: translateY(2px) scaleY(0.3); }
+  }
+
+  /* Puff de poeira no instante em que cada segmento pousa -- reforça a
+     sensação de "impacto" além do simples fade/scale do segmento. */
+  .tab-anim-elementos .crane-puff {
+    fill: var(--text2);
+    opacity: 0;
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: crane-dust-puff 5s linear infinite;
+  }
+  .tab-anim-elementos .cp-1 { animation-delay: 0.55s; }
+  .tab-anim-elementos .cp-2 { animation-delay: 1.55s; }
+  .tab-anim-elementos .cp-3 { animation-delay: 2.55s; }
+  .tab-anim-elementos .cp-4 { animation-delay: 3.55s; }
+  .tab-anim-elementos .cp-5 { animation-delay: 4.55s; }
+  @keyframes crane-dust-puff {
+    0%, 8%, 100% { opacity: 0; transform: scale(0.4); }
+    3%           { opacity: 0.85; transform: scale(1.7); }
   }
 
   /* Nomes: typewriter cycling through sample names */
@@ -3345,6 +3388,24 @@
     white-space: nowrap;
   }
 
+  /* Carrinho cruzando um mini-viaduto por cima da barra "Gerando
+     miniaturas" -- puramente decorativo (não representa o % real, que já
+     está no preenchimento e no rótulo), só para deixar a espera mais viva. */
+  .proc-bar-bridge {
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    height: 10px;
+    pointer-events: none;
+  }
+  .proc-bar-bridge svg { width: 100%; height: 100%; display: block; overflow: visible; }
+  .pbb-deck { stroke: rgba(212,245,60,0.3); stroke-width: 1; }
+  .pbb-car rect { fill: var(--accent); }
+  .pbb-car { animation: pbb-car-cross 1.7s linear infinite; }
+  @keyframes pbb-car-cross {
+    0%   { transform: translateX(-4px); }
+    100% { transform: translateX(104px); }
+  }
+
   /* DNIT LAYER PANEL */
   .layer-panel {
     position: absolute;
@@ -3734,6 +3795,31 @@
     min-width: 280px;
   }
 
+  /* Ponte em construção acima do título -- mesma linguagem visual da
+     ponte do cabeçalho e do guindaste da aba Elementos: torres/cabos
+     fixos, segmentos do tablado "acendendo" em sequência (como se
+     estivessem sendo montados) e um carro cruzando continuamente. */
+  .export-overlay-bridge { width: 100%; max-width: 200px; height: 52px; margin: 0 auto 6px; }
+  .export-overlay-bridge svg { width: 100%; height: 100%; overflow: visible; display: block; }
+  .eob-tower  { stroke: var(--text2); stroke-width: 2.4; stroke-linecap: round; }
+  .eob-cable  { fill: none; stroke: var(--border2); stroke-width: 1.4; }
+  .eob-hanger { stroke: var(--border2); stroke-width: 1; }
+  .eob-deck   { stroke: var(--text2); stroke-width: 2; stroke-linecap: round; }
+  .eob-seg { fill: var(--accent); opacity: 0.15; animation: eob-seg-pulse 2.4s ease-in-out infinite; }
+  .eob-seg-1 { animation-delay: 0s;   }
+  .eob-seg-2 { animation-delay: .2s;  }
+  .eob-seg-3 { animation-delay: .4s;  }
+  .eob-seg-4 { animation-delay: .6s;  }
+  .eob-seg-5 { animation-delay: .8s;  }
+  .eob-seg-6 { animation-delay: 1s;   }
+  @keyframes eob-seg-pulse { 0%, 55%, 100% { opacity: 0.15; } 22% { opacity: 1; } }
+  .eob-car rect { fill: var(--accent2); }
+  .eob-car { animation: eob-car-cross 3.2s linear infinite; }
+  @keyframes eob-car-cross {
+    0%   { transform: translateX(-10px); }
+    100% { transform: translateX(210px); }
+  }
+
   .export-overlay-title {
     font-family: var(--display);
     font-size: 22px;
@@ -3762,6 +3848,75 @@
     width: 0%;
     transition: width 0.2s;
     border-radius: 4px;
+  }
+
+  /* ==========================================================================
+     PONTE — TRELIÇA ROLANDO DENTRO DAS BARRAS FINAS
+     As barras de 2-3px (import de fotos, KML, upscale/compressão, export de
+     imagem) são finas demais para um carrinho literal sem cortar a figura
+     (todas usam overflow:hidden). Em vez disso, o preenchimento ganha um
+     zigue-zague deslizante -- o mesmo desenho de uma treliça tipo Warren --
+     para parecer estrutura sendo montada em vez de uma cor parada.
+     Declarado depois das regras acima de propósito: sobrescreve só
+     background-image/size/animation, mantendo a cor sólida de cada uma
+     como base.
+     ========================================================================== */
+  .progress-fill,
+  .kml-progress-fill,
+  .export-progress-fill,
+  .issues-progress-bar {
+    background-image: repeating-linear-gradient(
+      -45deg,
+      rgba(255,255,255,0.32) 0,
+      rgba(255,255,255,0.32) 2px,
+      transparent 2px,
+      transparent 9px
+    );
+    background-size: 200% 100%;
+    animation: truss-scroll 0.9s linear infinite;
+  }
+  @keyframes truss-scroll {
+    from { background-position: 0 0; }
+    to   { background-position: -18px 0; }
+  }
+
+  /* ==========================================================================
+     BOTÕES QUE DEMORAM PARA BAIXAR/GERAR ALGO
+     Substitui o antigo "⏳ TEXTO…" (só texto) por um mini-viaduto animado
+     (torres, cabos, tablado sendo montado + carro cruzando) ao lado do
+     rótulo. currentColor -- funciona tanto num botão de fundo escuro quanto
+     num de fundo lima. Ligado via setButtonLoading()/clearButtonLoading()
+     em 00-core.js; usado por "Gerar Imagem" (Rotas), "Baixar Renomeadas"
+     (Fotos Superiores) e "Processar"/"Baixar" (GPX).
+     ========================================================================== */
+  .btn-loading { cursor: progress !important; }
+  .btn-bridge-loader {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 15px;
+    flex-shrink: 0;
+    vertical-align: middle;
+    margin-right: 7px;
+  }
+  .btn-bridge-loader svg { width: 100%; height: 100%; overflow: visible; display: block; }
+  .bl-tower  { stroke: currentColor; stroke-width: 2; stroke-linecap: round; opacity: 0.55; }
+  .bl-cable  { fill: none; stroke: currentColor; stroke-width: 1; opacity: 0.4; }
+  .bl-hanger { stroke: currentColor; stroke-width: 0.9; opacity: 0.4; }
+  .bl-deck   { stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; opacity: 0.55; }
+  .bl-seg { fill: currentColor; opacity: 0.2; animation: bl-seg-pulse 1.3s ease-in-out infinite; }
+  .bl-seg-1 { animation-delay: 0s;    }
+  .bl-seg-2 { animation-delay: .13s; }
+  .bl-seg-3 { animation-delay: .26s; }
+  .bl-seg-4 { animation-delay: .39s; }
+  .bl-seg-5 { animation-delay: .52s; }
+  @keyframes bl-seg-pulse { 0%, 60%, 100% { opacity: 0.2; } 25% { opacity: 1; } }
+  .bl-car rect { fill: currentColor; }
+  .bl-car { animation: bl-car-cross 1.8s linear infinite; }
+  @keyframes bl-car-cross {
+    0%   { transform: translateX(-4px); }
+    100% { transform: translateX(68px); }
   }
 
   /* ==========================================================================

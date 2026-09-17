@@ -1,0 +1,909 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FOTOS COM GPS</title>
+<link rel="preconnect" href="https://unpkg.com" crossorigin>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Cinzel:wght@700;900&family=Cormorant+Garamond:wght@300;400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.css"/>
+<link rel="stylesheet" href="styles.css?v=39">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js" defer></script>
+<script src="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/leaflet-rotate@0.2.8/dist/leaflet-rotate-src.js" defer></script>
+<script src="https://api.mapbox.com/mapbox.js/plugins/leaflet-omnivore/v0.3.1/leaflet-omnivore.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/exifr/dist/full.umd.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/piexifjs@1.0.6/piexif.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js" defer></script>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-group">
+      <span class="logo-ms">MS</span>
+      <span class="logo-sub">Automations</span>
+    </div>
+    <div class="logo-bridge" aria-hidden="true">
+      <svg viewBox="0 0 120 40" preserveAspectRatio="xMidYMid meet">
+        <line class="bridge-deck" x1="4" y1="27" x2="116" y2="27"/>
+        <line class="bridge-pier" x1="30" y1="6" x2="30" y2="27"/>
+        <line class="bridge-pier" x1="90" y1="6" x2="90" y2="27"/>
+        <path class="bridge-cable" d="M8,27 Q30,10 52,27"/>
+        <path class="bridge-cable" d="M52,27 Q90,4 112,27"/>
+        <line class="bridge-hanger" x1="18" y1="27" x2="18" y2="17"/>
+        <line class="bridge-hanger" x1="44" y1="27" x2="44" y2="18"/>
+        <line class="bridge-hanger" x1="70" y1="27" x2="70" y2="14"/>
+        <line class="bridge-hanger" x1="100" y1="27" x2="100" y2="14"/>
+        <line class="bridge-support" x1="10" y1="27" x2="10" y2="34"/>
+        <line class="bridge-support" x1="110" y1="27" x2="110" y2="34"/>
+        <g class="bridge-car bridge-car-1"><rect x="0" y="21.5" width="8" height="4" rx="1"/></g>
+        <g class="bridge-car bridge-car-2"><rect x="0" y="21.5" width="7" height="4" rx="1"/></g>
+        <g class="bridge-car bridge-car-3"><rect x="0" y="21.5" width="8" height="4" rx="1"/></g>
+        <!-- rastro fantasma de cada carro (mesmo caminho, um pouco atrasado
+             e mais transparente) -- dá sensação de velocidade sem precisar
+             de mais lógica, só um delay de animação diferente. -->
+        <g class="bridge-car-trail bridge-car-1-trail"><rect x="0" y="21.5" width="8" height="4" rx="1"/></g>
+        <g class="bridge-car-trail bridge-car-2-trail"><rect x="0" y="21.5" width="7" height="4" rx="1"/></g>
+        <g class="bridge-car-trail bridge-car-3-trail"><rect x="0" y="21.5" width="8" height="4" rx="1"/></g>
+        <g class="bridge-drone">
+          <line class="drone-arm" x1="-5" y1="-5" x2="5" y2="5"/>
+          <line class="drone-arm" x1="-5" y1="5" x2="5" y2="-5"/>
+          <circle class="drone-rotor" cx="-5" cy="-5" r="2.1"/>
+          <circle class="drone-rotor" cx="5" cy="-5" r="2.1"/>
+          <circle class="drone-rotor" cx="-5" cy="5" r="2.1"/>
+          <circle class="drone-rotor" cx="5" cy="5" r="2.1"/>
+          <circle class="drone-body" cx="0" cy="0" r="2.6"/>
+        </g>
+      </svg>
+    </div>
+  </div>
+  <nav class="top-tabs" id="topTabs">
+    <button class="top-tab-btn active" id="tabPhotos" onclick="switchTab('photos')"><span class="top-tab-icon">📷</span>Fotos</button>
+    <button class="top-tab-btn" id="tabPontos" onclick="switchTab('pontos')"><span class="top-tab-icon">📌</span>Pontos</button>
+    <button class="top-tab-btn" id="tabRotas" onclick="switchTab('rotas')"><span class="top-tab-icon">🛣</span>Rotas</button>
+    <button class="top-tab-btn" id="tabMedidas" onclick="switchTab('medidas')"><span class="top-tab-icon">📏</span>Dados</button>
+    <button class="top-tab-btn" id="tabElementos" onclick="switchTab('elementos')"><span class="top-tab-icon">🧱</span>Elementos</button>
+    <button class="top-tab-btn" id="tabNomes" onclick="switchTab('nomes')"><span class="top-tab-icon">🏷</span>Nomes</button>
+    <button class="top-tab-btn" id="tabGpx" onclick="switchTab('gpx')"><span class="top-tab-icon">🛰</span>GPX</button>
+    <button class="top-tab-btn" id="tabInspecoes" onclick="switchTab('inspecoes')"><span class="top-tab-icon">👷</span>Inspeções</button>
+  </nav>
+  <div class="header-right">
+    <div class="header-tab-anim" id="headerTabAnim" aria-hidden="true">
+      <div class="tab-anim tab-anim-photos active">
+        <svg viewBox="0 0 40 30">
+          <circle class="cam-flash-burst" cx="30" cy="9" r="1"/>
+          <rect class="cam-body" x="6" y="11" width="24" height="15" rx="2"/>
+          <rect class="cam-top" x="14" y="7" width="8" height="5" rx="1"/>
+          <circle class="cam-lens-outer" cx="17" cy="19" r="6"/>
+          <circle class="cam-lens-inner" cx="17" cy="19" r="2.6"/>
+          <polygon class="cam-flash" points="28,9 34,6 31,11 35,11 27,17 29,12 26,12"/>
+        </svg>
+      </div>
+      <div class="tab-anim tab-anim-pontos">
+        <svg class="pin-icon" viewBox="0 0 40 48">
+          <ellipse class="pin-icon-shadow" cx="20" cy="43" rx="11" ry="3.4"/>
+          <g class="pin-icon-marker">
+            <path class="pin-icon-body" d="M20,3 C11.16,3 4,10.16 4,19 C4,30 20,41 20,41 C20,41 36,30 36,19 C36,10.16 28.84,3 20,3 Z"/>
+            <circle class="pin-icon-hole" cx="20" cy="19" r="7.4"/>
+          </g>
+        </svg>
+      </div>
+      <div class="tab-anim tab-anim-rotas">
+        <svg viewBox="0 0 40 30">
+          <path class="route-line" d="M4,25 Q13,4 20,16 T36,5"/>
+          <!-- rastro: dois carros-fantasma no mesmo trajeto, começando um
+               pouco "depois" (begin > 0), então ficam sempre alguns
+               décimos de segundo atrás do carro principal. -->
+          <g class="route-car-trail route-car-trail-2">
+            <rect class="car-body" x="-3.6" y="-1.8" width="7.2" height="3.6" rx="1.3"/>
+            <animateMotion dur="3s" begin="0.3s" repeatCount="indefinite" rotate="auto" path="M4,25 Q13,4 20,16 T36,5"/>
+          </g>
+          <g class="route-car-trail route-car-trail-1">
+            <rect class="car-body" x="-3.6" y="-1.8" width="7.2" height="3.6" rx="1.3"/>
+            <animateMotion dur="3s" begin="0.15s" repeatCount="indefinite" rotate="auto" path="M4,25 Q13,4 20,16 T36,5"/>
+          </g>
+          <g class="route-car">
+            <rect class="car-body" x="-3.6" y="-1.8" width="7.2" height="3.6" rx="1.3"/>
+            <rect class="car-windshield" x="0.1" y="-1.15" width="2.5" height="2.3" rx="0.5"/>
+            <rect class="car-roofline" x="-1.6" y="-1.15" width="1.5" height="2.3" rx="0.4"/>
+            <circle class="car-light" cx="3.35" cy="-1" r="0.45"/>
+            <circle class="car-light" cx="3.35" cy="1" r="0.45"/>
+            <animateMotion dur="3s" repeatCount="indefinite" rotate="auto" path="M4,25 Q13,4 20,16 T36,5"/>
+          </g>
+        </svg>
+      </div>
+      <div class="tab-anim tab-anim-medidas">
+        <svg viewBox="0 0 40 30">
+          <rect class="monitor-frame" x="4" y="4" width="32" height="20" rx="2"/>
+          <rect class="monitor-screen" x="6.5" y="6.5" width="27" height="15"/>
+          <rect class="monitor-stand" x="17" y="24" width="6" height="3"/>
+          <rect class="monitor-base" x="11" y="27" width="18" height="2" rx="1"/>
+          <line class="mon-line mon-line-1" x1="9.5" y1="10.5" x2="20.5" y2="10.5"/>
+          <line class="mon-line mon-line-2" x1="9.5" y1="14.5" x2="26.5" y2="14.5"/>
+          <line class="mon-line mon-line-3" x1="9.5" y1="18.5" x2="17.5" y2="18.5"/>
+        </svg>
+      </div>
+      <div class="tab-anim tab-anim-elementos">
+        <svg viewBox="0 0 40 30">
+          <path class="build-cable" d="M4,24 Q10,9 20,24"/>
+          <path class="build-cable" d="M20,24 Q30,6 36,24"/>
+          <line class="build-hanger" x1="8"  y1="20" x2="8"  y2="24"/>
+          <line class="build-hanger" x1="14" y1="15" x2="14" y2="24"/>
+          <line class="build-hanger" x1="26" y1="12" x2="26" y2="24"/>
+          <line class="build-hanger" x1="32" y1="17" x2="32" y2="24"/>
+          <line class="build-tower" x1="10" y1="6" x2="10" y2="24"/>
+          <line class="build-tower" x1="30" y1="6" x2="30" y2="24"/>
+          <rect class="deck-seg seg-1" x="4"  y="21" width="6" height="2.4"/>
+          <rect class="deck-seg seg-2" x="10" y="21" width="6" height="2.4"/>
+          <rect class="deck-seg seg-3" x="16" y="21" width="6" height="2.4"/>
+          <rect class="deck-seg seg-4" x="22" y="21" width="6" height="2.4"/>
+          <rect class="deck-seg seg-5" x="28" y="21" width="6" height="2.4"/>
+          <!-- puff de poeira no instante em que cada segmento "pousa" --
+               puramente decorativo, sincronizado com deck-seg-build-N. -->
+          <circle class="crane-puff cp-1" cx="7"  cy="20.2" r="2"/>
+          <circle class="crane-puff cp-2" cx="13" cy="20.2" r="2"/>
+          <circle class="crane-puff cp-3" cx="19" cy="20.2" r="2"/>
+          <circle class="crane-puff cp-4" cx="25" cy="20.2" r="2"/>
+          <circle class="crane-puff cp-5" cx="31" cy="20.2" r="2"/>
+          <g class="crane-carriage">
+            <line class="crane-boom" x1="1" y1="15" x2="7" y2="5"/>
+            <rect class="crane-truck-body" x="-4" y="14" width="8" height="6" rx="1"/>
+            <rect class="crane-truck-cab" x="1.6" y="15.4" width="2.8" height="4" rx="0.6"/>
+            <circle class="crane-truck-wheel" cx="-2.2" cy="20.4" r="1.3"/>
+            <circle class="crane-truck-wheel" cx="2.2"  cy="20.4" r="1.3"/>
+            <g class="crane-cable-group">
+              <line class="crane-cable" x1="7" y1="5" x2="7" y2="19"/>
+              <rect class="crane-load" x="4" y="16.4" width="6" height="2.4" rx="0.5"/>
+            </g>
+          </g>
+        </svg>
+      </div>
+      <div class="tab-anim tab-anim-nomes">
+        <span class="names-typewriter" id="namesTypewriter"></span><span class="names-cursor">|</span>
+      </div>
+    </div>
+  </div>
+</header>
+
+<div class="app">
+  <div class="sidebar" id="sidebar">
+    <div class="sidebar-resizer" id="sidebarResizer"></div>
+    <button class="sidebar-toggle" id="sidebarToggle" title="Minimizar / Expandir painel">◀</button>
+    <div class="upload-zone" id="uploadZone">
+      <input type="file" id="fileInput" accept="image/*" multiple style="display:none">
+    </div>
+    <div class="date-timeline-header">DATAS</div>
+    <div class="date-timeline" id="dateTimeline">
+      <div class="date-timeline-empty">NENHUMA FOTO ADICIONADA</div>
+    </div>
+
+    <div class="progress-bar">
+      <div class="progress-fill" id="progressFill"></div>
+    </div>
+
+    <div class="stats-bar">
+      <div class="stat">
+        <span class="stat-val" id="statTotal">0</span>
+        FOTOS
+      </div>
+      <div class="stat">
+        <span class="stat-val accent" id="statGPS">0</span>
+        COM GPS
+      </div>
+      <div class="stat">
+        <span class="stat-val" id="statNoGPS">0</span>
+        SEM GPS
+      </div>
+    </div>
+
+    <div class="tab-content active" id="tabContentPhotos">
+      <div class="sort-bar" id="sortBar">
+        <span class="sort-label">ORDENAR</span>
+        <button class="sort-btn" id="sortBtnDate" onclick="setSort('date','desc')" title="Data mais recente primeiro">DATA ↓</button>
+        <button class="sort-btn" id="sortBtnDateAsc" onclick="setSort('date','asc')" title="Data mais antiga primeiro">DATA ↑</button>
+        <button class="sort-btn active" id="sortBtnNameAsc" onclick="setSort('name','asc')" title="Nome A→Z">NOME ↑</button>
+        <button class="sort-btn" id="sortBtnNameDesc" onclick="setSort('name','desc')" title="Nome Z→A">NOME ↓</button>
+      </div>
+      <div class="dot-legend">
+        <div class="dot-legend-item">
+          <div class="dot-legend-dot gps"></div>
+          <span class="dot-legend-label">COM GPS</span>
+        </div>
+        <div class="dot-legend-item">
+          <div class="dot-legend-dot no-gps"></div>
+          <span class="dot-legend-label">SEM GPS</span>
+        </div>
+        <div class="dot-legend-item">
+          <div class="dot-legend-dot dup-gps"></div>
+          <span class="dot-legend-label">GPS DUPLO</span>
+        </div>
+        <div class="dot-legend-item">
+          <div class="dot-legend-dot mp-ok"></div>
+          <span class="dot-legend-label">≥12 MP</span>
+        </div>
+        <div class="dot-legend-item">
+          <div class="dot-legend-dot mp-low"></div>
+          <span class="dot-legend-label">&lt;12 MP</span>
+        </div>
+      </div>
+      <div class="photo-list" id="photoList"></div>
+
+      <div class="meta-bulk-bar" id="fsupBar">
+        <button class="meta-bulk-toggle" id="fsupToggle" onclick="toggleFsupPanel()">
+          <span class="bulk-chevron">▶</span> 🧭 RENOMEAR FOTOS SUPERIORES
+        </button>
+        <div class="meta-bulk-fields" id="fsupFields">
+          <div style="padding:0 16px;">
+            <p style="font-size:10.5px;color:var(--text2);margin:0 0 10px;">
+              Solte as fotos superiores da obra: elas aparecem como pinos no mapa — clique em cada uma, na ordem certa, para numerar F-01, F-02...
+            </p>
+            <div class="elem-dropzone elem-compact" id="fsupDropzone">
+              <div class="elem-dz-left">
+                <div class="elem-dz-icon">＋</div>
+                <div class="elem-dz-text">
+                  <b>Arraste as fotos superiores aqui</b>
+                  <span>Renomeia na ordem em que você clicar nos pinos</span>
+                </div>
+              </div>
+              <div class="elem-dz-buttons">
+                <button class="elem-btn primary" id="fsupBtnChoose" type="button">Escolher fotos</button>
+              </div>
+              <input type="file" id="fsupFileInput" accept="image/*" multiple style="display:none">
+            </div>
+            <div id="fsupResults" style="display:none;margin-top:10px;"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="meta-bulk-bar">
+        <button class="meta-bulk-toggle" id="metaBulkToggle" onclick="toggleBulkEdit()">
+          <span class="bulk-chevron">▶</span> ✏ EDITAR TODAS AS FOTOS (EXIF)
+        </button>
+        <div class="meta-bulk-fields" id="metaBulkFields">
+          <div class="meta-bulk-field-row"><span class="meta-bulk-field-key">Marca da Câmera</span><input class="meta-bulk-input" id="bulk_Make" placeholder="deixe vazio para pular"></div>
+          <div class="meta-bulk-field-row"><span class="meta-bulk-field-key">Modelo da Câmera</span><input class="meta-bulk-input" id="bulk_Model" placeholder="deixe vazio para pular"></div>
+          <div class="meta-bulk-field-row"><span class="meta-bulk-field-key">Lente</span><input class="meta-bulk-input" id="bulk_LensModel" placeholder="deixe vazio para pular"></div>
+          <div class="meta-bulk-field-row"><span class="meta-bulk-field-key">Distancia Focal</span><input class="meta-bulk-input" id="bulk_FocalLength" placeholder="mm — deixe vazio para pular" type="number"></div>
+          <div class="meta-bulk-field-row"><span class="meta-bulk-field-key">Abertura f/</span><input class="meta-bulk-input" id="bulk_FNumber" placeholder="deixe vazio para pular" type="number" step="0.1"></div>
+          <div class="meta-bulk-field-row"><span class="meta-bulk-field-key">ISO</span><input class="meta-bulk-input" id="bulk_ISO" placeholder="deixe vazio para pular" type="number"></div>
+          <div class="meta-bulk-field-row"><span class="meta-bulk-field-key">Software</span><input class="meta-bulk-input" id="bulk_Software" placeholder="deixe vazio para pular"></div>
+          <div class="meta-bulk-field-row"><span class="meta-bulk-field-key">GPS Lat</span><input class="meta-bulk-input" id="bulk_lat" placeholder="deixe vazio para pular" type="number" step="any"></div>
+          <div class="meta-bulk-field-row"><span class="meta-bulk-field-key">GPS Lng</span><input class="meta-bulk-input" id="bulk_lng" placeholder="deixe vazio para pular" type="number" step="any"></div>
+          <button class="meta-bulk-apply" onclick="applyBulkEdit()">⬇ APLICAR PARA TODAS AS FOTOS</button>
+        </div>
+      </div>
+
+      <div class="detail-panel" id="detailPanel" style="display:none">
+        <div class="detail-header" id="detailHeader" onclick="toggleDetailCollapse(event)">
+          <span style="font-family:var(--mono);font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;display:flex;align-items:center;gap:8px;">
+            <span class="detail-chevron" id="detailChevron">▶</span> EDITAR FOTO <span class="meta-saved-dot" id="metaSavedDot"></span>
+          </span>
+          <button class="btn-edit-meta" id="editMetaBtn" onclick="event.stopPropagation();toggleMetaEdit()">✎ EDITAR</button>
+        </div>
+        <div class="detail-rows" id="detailRows"></div>
+      </div>
+    </div>
+
+    <div class="tab-content" id="tabContentPontos">
+      <div class="pontos-toolbar">
+        <button class="btn-add-ponto" id="btnAddPonto" onclick="togglePontoPicking()">📌 Clicar no mapa</button>
+      </div>
+      <div class="pontos-empty" id="pontosEmpty">
+        <span style="font-size:28px;opacity:0.3;">📌</span>
+        <div style="font-family:var(--mono);font-size:9px;letter-spacing:1.5px;color:var(--muted);margin-top:8px;text-transform:uppercase;">Nenhum ponto criado</div>
+        <div style="font-family:var(--mono);font-size:8px;color:var(--border2);margin-top:4px;">Clique no botão acima ou use a barra de busca</div>
+      </div>
+      <div class="pontos-list" id="pontosList"></div>
+    </div>
+
+    <div class="tab-content" id="tabContentRotas">
+      <div class="route-reimport-row">
+        <button class="route-reimport-btn" id="routeReimportBtn" type="button"
+          title="Reabrir um KML de rotas exportado antes por esta ferramenta, para continuar editando as paradas">
+          🔁 Reimportar KML de rotas
+        </button>
+        <input type="file" id="routeReimportInput" accept=".kml,.kmz" style="display:none">
+      </div>
+
+      <div class="route-panel" id="routePanelA" data-route="a" style="--route-color:#ff0000">
+        <div class="route-panel-header">
+          <span class="route-color-dot"></span>
+          <div class="route-name-compound">
+            <span class="route-name-prefix">ROTA_ALTERNATIVA_</span><input type="text" class="route-name-input" id="routeNameA" value=""
+              spellcheck="false" placeholder="trecho" oninput="renameRoute('a', this.value)"><span class="route-name-suffix" id="routeNameSuffixA">_0.0KM</span>
+          </div>
+        </div>
+        <div class="route-panel-toolbar">
+          <button class="btn-add-ponto route-add-stop-btn" id="btnRouteAddA" onclick="toggleRoutePicking('a')">📍 Clicar no mapa</button>
+          <button class="route-suggest-btn" id="btnRouteSuggestA" onclick="suggestAlternateRoute('a')" title="Sugerir rota alternativa">🔀</button>
+          <button class="route-clear-btn" id="btnRouteClearA" onclick="clearRoute('a')" title="Limpar rota">🗑</button>
+        </div>
+        <button class="route-from-green-btn" id="btnRouteFromGreen" onclick="useGreenRoutePoints()"
+          title="Usa só o início e o fim da Rota Original (verde) e sugere um caminho por outra rodovia, a partir da interseção real mais próxima — útil como desvio caso a via original esteja bloqueada">🟢→🔴 Desvio (início/fim da Rota Original)</button>
+        <button class="route-from-green-btn route-from-green-btn-manual" id="btnRoutePickVia" onclick="pickAlternateRouteVia()"
+          title="Usa o início e o fim da Rota Original (verde), mas deixa você clicar no mapa por onde o desvio deve passar, em vez de o app tentar adivinhar">📍 Desvio (eu escolho o ponto)</button>
+        <div class="route-stops-empty" id="routeStopsEmptyA">Nenhuma parada adicionada</div>
+        <div class="route-stops-list" id="routeStopsListA"></div>
+        <div class="route-alternatives" id="routeAlternativesA" style="display:none"></div>
+      </div>
+
+      <div class="route-panel" id="routePanelB" data-route="b" style="--route-color:#00ff00">
+        <div class="route-panel-header">
+          <span class="route-color-dot"></span>
+          <div class="route-name-compound">
+            <span class="route-name-prefix">ROTA_ORIGINAL_</span><input type="text" class="route-name-input" id="routeNameB" value=""
+              spellcheck="false" placeholder="trecho" oninput="renameRoute('b', this.value)"><span class="route-name-suffix" id="routeNameSuffixB">_0.0KM</span>
+          </div>
+        </div>
+        <div class="route-panel-toolbar">
+          <button class="btn-add-ponto route-add-stop-btn" id="btnRouteAddB" onclick="toggleRoutePicking('b')">📍 Clicar no mapa</button>
+          <button class="route-suggest-btn" id="btnRouteSuggestB" onclick="suggestAlternateRoute('b')" title="Sugerir rota alternativa">🔀</button>
+          <button class="route-clear-btn" id="btnRouteClearB" onclick="clearRoute('b')" title="Limpar rota">🗑</button>
+        </div>
+        <div class="route-stops-empty" id="routeStopsEmptyB">Nenhuma parada adicionada</div>
+        <div class="route-stops-list" id="routeStopsListB"></div>
+        <div class="route-alternatives" id="routeAlternativesB" style="display:none"></div>
+      </div>
+
+      <div class="route-result-row">
+        <span class="route-result-label">TRAJETO:</span>
+        <span class="route-result-value" id="routeTrajetoValue">—</span>
+        <button class="route-result-copy" id="routeCopyTrajetoBtn" onclick="copyRouteTrajeto()" title="Copiar trajeto">Copiar</button>
+      </div>
+      <div class="route-result-row">
+        <span class="route-result-label">DIFERENÇA (KM):</span>
+        <span class="route-result-value" id="routeDiffValue">—</span>
+        <button class="route-result-copy" id="routeCopyDiffBtn" onclick="copyRouteDiffKm()" title="Copiar diferença">Copiar</button>
+      </div>
+      <div class="route-export-row">
+        <button class="btn-export route-export-btn" id="routeDownloadBtn" type="button" onclick="downloadRoute()" title="Baixa o KML + CSV (trajeto/diferença) e gera a imagem JPG com as rotas">⬇ BAIXAR ROTA</button>
+      </div>
+    </div>
+
+    <div class="tab-content" id="tabContentMedidas">
+      <div class="medidas-intro">Solte um KML com pontos <b>LD_INICIO_OAE</b>, <b>LE_INICIO_OAE</b>, <b>LD_FINAL_OAE</b> e <b>LE_FINAL_OAE</b> (ou as variações "PONTE") para calcular a estrutura.</div>
+      <div class="medidas-row medidas-global-row"><span>Data Inspeção</span><b id="medidasInspectionDate">—</b></div>
+      <div class="medidas-empty" id="medidasEmpty">Nenhuma estrutura identificada ainda</div>
+      <div class="medidas-list" id="medidasList"></div>
+    </div>
+
+    <div class="tab-content" id="tabContentElementos">
+      <div class="elem-titleblock">
+        <div>
+          <p class="elem-eyebrow">Sistema · Leitura de arquivo CSV</p>
+          <h2 class="elem-h1">Leitor de Elementos SGE</h2>
+          <p class="elem-subtitle">Organiza por tramo e categoria estrutural, agrupando por código de tipo (ID) e nome — pronto para copiar as dimensões direto para a planilha.</p>
+        </div>
+        <div class="elem-tb-meta">
+          REF <b id="elemMetaFile">—</b><br>
+          ELEM <b id="elemMetaElems">0</b> · TIPOS <b id="elemMetaTypes">0</b>
+        </div>
+      </div>
+
+      <div class="elem-dropzone" id="elemDropzone">
+        <div class="elem-dz-left">
+          <div class="elem-dz-icon">＋</div>
+          <div class="elem-dz-text">
+            <b>Arraste um arquivo .csv aqui, em qualquer lugar desta área</b>
+            <span>Exportação padrão SGE/DNIT (separador ";", decimal ",")</span>
+          </div>
+        </div>
+        <div class="elem-dz-buttons">
+          <button class="elem-btn" id="elemBtnSample" type="button">Carregar exemplo</button>
+          <button class="elem-btn primary" id="elemBtnChoose" type="button">Escolher arquivo</button>
+        </div>
+        <input type="file" id="elemFileInput" accept=".csv,text/csv" style="display:none">
+      </div>
+
+      <div class="elem-toolbar" id="elemToolbar" style="display:none;">
+        <div class="elem-stats">
+          <div class="elem-stat"><b id="elemStatElems">0</b><span>elementos</span></div>
+          <div class="elem-stat"><b id="elemStatTypes">0</b><span>tipos (nome+id)</span></div>
+          <div class="elem-stat"><b id="elemStatGroupsShown">0</b><span>grupos exibidos</span></div>
+        </div>
+        <div class="elem-controls">
+          <input class="elem-search" id="elemSearch" type="text" placeholder="Filtrar por nome do tipo…">
+          <button class="elem-btn" id="elemBtnToggleAll" type="button">Expandir tudo</button>
+        </div>
+      </div>
+
+      <div id="elemGroups"></div>
+      <div class="elem-empty-state" id="elemEmptyState">
+        <div class="big">Nenhum arquivo carregado ainda</div>
+        envie um .csv exportado do SGE para começar
+      </div>
+    </div>
+
+    <div class="tab-content" id="tabContentNomes">
+      <div class="nomes-titleblock">
+        <div class="nomes-tb-corner-tr"></div><div class="nomes-tb-corner-br"></div>
+        <div>
+          <p class="nomes-eyebrow">Sistema · Nomenclatura de fotos</p>
+          <h2 class="nomes-h1">Gerador de Nomes de Fotos</h2>
+          <p class="nomes-subtitle">Monta os nomes padronizados das fotos de inspeção de uma OAE — fotos superiores (fixas, via diagrama) e fotos inferiores (configuráveis) — prontos para copiar direto para o arquivo de fotos.</p>
+        </div>
+      </div>
+
+      <div style="margin-bottom:16px;">
+        <button class="nomes-btn primary" id="nomesBtnExportCsv" type="button" style="width:100%;" title="Legendas já criadas (as 11 superiores + as inferiores geradas), em ordem crescente de número.">
+          ⬇ EXPORTAR LEGENDAS (CSV)
+        </button>
+      </div>
+
+      <div class="nomes-section">
+        <div class="nomes-section-head">
+          <h2>Fotos Superiores</h2>
+          <span class="nomes-section-count" id="nomesStaticNamesCount"></span>
+        </div>
+        <div class="nomes-controls" style="margin-bottom:12px;">
+          <button class="nomes-btn" id="nomesBtnCopyAllStatic" type="button">Copiar tudo</button>
+          <button class="nomes-btn" id="nomesBtnUnmarkStatic" type="button">Desmarcar copiadas</button>
+        </div>
+
+        <div class="nomes-oae-diagram-wrap">
+          <svg id="nomesStaticDiagram" class="nomes-oae-diagram" viewBox="0 0 560 360" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <marker id="nomesOaeArrowhead" markerWidth="7" markerHeight="7" refX="5" refY="3.5" orient="auto">
+                <path d="M0,0 L7,3.5 L0,7 Z" class="nomes-diagram-arrowhead" fill="var(--accent)"></path>
+              </marker>
+            </defs>
+
+            <rect class="nomes-diagram-rect" x="140" y="110" width="280" height="140" fill="none" stroke="var(--border2)" stroke-width="2"></rect>
+
+            <line class="nomes-diagram-arrow" x1="110" y1="66" x2="138" y2="108" stroke="var(--accent)" stroke-width="2" marker-end="url(#nomesOaeArrowhead)"></line>
+            <line class="nomes-diagram-arrow" x1="280" y1="64" x2="280" y2="108" stroke="var(--accent)" stroke-width="2" marker-end="url(#nomesOaeArrowhead)"></line>
+            <line class="nomes-diagram-arrow" x1="450" y1="66" x2="422" y2="108" stroke="var(--accent)" stroke-width="2" marker-end="url(#nomesOaeArrowhead)"></line>
+            <line class="nomes-diagram-arrow" x1="467" y1="180" x2="423" y2="180" stroke="var(--accent)" stroke-width="2" marker-end="url(#nomesOaeArrowhead)"></line>
+            <line class="nomes-diagram-arrow" x1="450" y1="294" x2="422" y2="252" stroke="var(--accent)" stroke-width="2" marker-end="url(#nomesOaeArrowhead)"></line>
+            <line class="nomes-diagram-arrow" x1="280" y1="296" x2="280" y2="252" stroke="var(--accent)" stroke-width="2" marker-end="url(#nomesOaeArrowhead)"></line>
+            <line class="nomes-diagram-arrow" x1="110" y1="294" x2="138" y2="252" stroke="var(--accent)" stroke-width="2" marker-end="url(#nomesOaeArrowhead)"></line>
+            <line class="nomes-diagram-arrow" x1="93" y1="180" x2="133" y2="180" stroke="var(--accent)" stroke-width="2" marker-end="url(#nomesOaeArrowhead)"></line>
+            <line class="nomes-diagram-arrow" x1="203" y1="180" x2="238" y2="180" stroke="var(--accent)" stroke-width="2" marker-end="url(#nomesOaeArrowhead)"></line>
+            <line class="nomes-diagram-arrow" x1="357" y1="180" x2="322" y2="180" stroke="var(--accent)" stroke-width="2" marker-end="url(#nomesOaeArrowhead)"></line>
+
+            <g class="nomes-diagram-badge" data-index="0" role="button" tabindex="0" aria-label="Copiar nome 01">
+              <title>LE INICIO, DIAGONAL SUPERIOR</title>
+              <circle class="nomes-diagram-badge-circle" cx="95" cy="52" r="17"></circle>
+              <text class="nomes-diagram-badge-text" x="95" y="52" dy="0.35em">01</text>
+            </g>
+            <g class="nomes-diagram-badge" data-index="1" role="button" tabindex="0" aria-label="Copiar nome 02">
+              <title>LE LATERAL, SUPERIOR</title>
+              <circle class="nomes-diagram-badge-circle" cx="280" cy="45" r="17"></circle>
+              <text class="nomes-diagram-badge-text" x="280" y="45" dy="0.35em">02</text>
+            </g>
+            <g class="nomes-diagram-badge" data-index="2" role="button" tabindex="0" aria-label="Copiar nome 03">
+              <title>LE FINAL, DIAGONAL SUPERIOR</title>
+              <circle class="nomes-diagram-badge-circle" cx="465" cy="52" r="17"></circle>
+              <text class="nomes-diagram-badge-text" x="465" y="52" dy="0.35em">03</text>
+            </g>
+            <g class="nomes-diagram-badge" data-index="3" role="button" tabindex="0" aria-label="Copiar nome 04">
+              <title>DECRESCENTE SUPERIOR</title>
+              <circle class="nomes-diagram-badge-circle" cx="485" cy="180" r="17"></circle>
+              <text class="nomes-diagram-badge-text" x="485" y="180" dy="0.35em">04</text>
+            </g>
+            <g class="nomes-diagram-badge" data-index="4" role="button" tabindex="0" aria-label="Copiar nome 05">
+              <title>LD FINAL, DIAGONAL SUPERIOR</title>
+              <circle class="nomes-diagram-badge-circle" cx="465" cy="308" r="17"></circle>
+              <text class="nomes-diagram-badge-text" x="465" y="308" dy="0.35em">05</text>
+            </g>
+            <g class="nomes-diagram-badge" data-index="5" role="button" tabindex="0" aria-label="Copiar nome 06">
+              <title>LD LATERAL, SUPERIOR</title>
+              <circle class="nomes-diagram-badge-circle" cx="280" cy="315" r="17"></circle>
+              <text class="nomes-diagram-badge-text" x="280" y="315" dy="0.35em">06</text>
+            </g>
+            <g class="nomes-diagram-badge" data-index="6" role="button" tabindex="0" aria-label="Copiar nome 07">
+              <title>LD INICIO, DIAGONAL SUPERIOR</title>
+              <circle class="nomes-diagram-badge-circle" cx="95" cy="308" r="17"></circle>
+              <text class="nomes-diagram-badge-text" x="95" y="308" dy="0.35em">07</text>
+            </g>
+            <g class="nomes-diagram-badge" data-index="7" role="button" tabindex="0" aria-label="Copiar nome 08">
+              <title>CRESCENTE SUPERIOR</title>
+              <circle class="nomes-diagram-badge-circle" cx="75" cy="180" r="17"></circle>
+              <text class="nomes-diagram-badge-text" x="75" y="180" dy="0.35em">08</text>
+            </g>
+            <g class="nomes-diagram-badge" data-index="9" role="button" tabindex="0" aria-label="Copiar nome 10">
+              <title>VISTA TERREA SENTIDO CRESCENTE</title>
+              <circle class="nomes-diagram-badge-circle" cx="185" cy="180" r="17"></circle>
+              <text class="nomes-diagram-badge-text" x="185" y="180" dy="0.35em">10</text>
+            </g>
+            <g class="nomes-diagram-badge" data-index="8" role="button" tabindex="0" aria-label="Copiar nome 09">
+              <title>SUPERIOR ORTOGONAL</title>
+              <circle class="nomes-diagram-badge-circle" cx="280" cy="180" r="17"></circle>
+              <text class="nomes-diagram-badge-text" x="280" y="180" dy="0.35em">09</text>
+            </g>
+            <g class="nomes-diagram-badge" data-index="10" role="button" tabindex="0" aria-label="Copiar nome 11">
+              <title>VISTA TERREA SENTIDO DECRESCENTE</title>
+              <circle class="nomes-diagram-badge-circle" cx="375" cy="180" r="17"></circle>
+              <text class="nomes-diagram-badge-text" x="375" y="180" dy="0.35em">11</text>
+            </g>
+          </svg>
+        </div>
+      </div>
+
+      <div class="nomes-section">
+        <div class="nomes-section-head">
+          <h2>Fotos Inferiores</h2>
+          <span class="nomes-section-count" id="nomesNamesCount"></span>
+        </div>
+
+        <div class="nomes-inf-controls-row">
+          <div class="nomes-numbering-row">
+            <label class="nomes-numbering-label" for="nomesStartNumber">Numeração inicial</label>
+            <input type="number" id="nomesStartNumber" class="nomes-num-input" min="1" value="12">
+          </div>
+          <div class="nomes-numbering-row">
+            <label class="nomes-numbering-label" for="nomesTramoCount">Quantidade de tramos</label>
+            <select class="nomes-num-input" id="nomesTramoCount"></select>
+          </div>
+        </div>
+
+        <p class="nomes-inf-hint">Clique nos círculos vazios para gerar o nome daquele ponto, na ordem que preferir — só os pontos clicados entram na lista.</p>
+
+        <div class="nomes-inf-diagrams" id="nomesInfDiagrams"></div>
+
+        <div class="nomes-toolbar" id="nomesNamesToolbar">
+          <div class="nomes-controls">
+            <button class="nomes-btn" id="nomesBtnCopyAllNames" type="button">Copiar tudo</button>
+            <button class="nomes-btn" id="nomesBtnUnmarkNames" type="button">Desmarcar copiados</button>
+            <button class="nomes-btn" id="nomesBtnClearNames" type="button">Limpar tudo</button>
+          </div>
+        </div>
+
+        <div class="nomes-name-list" id="nomesNamesList"></div>
+        <div class="nomes-empty-state" id="nomesNamesEmptyState">
+          <div class="nomes-big">Nenhum nome gerado ainda</div>
+          clique em um dos pontos do diagrama acima
+        </div>
+      </div>
+    </div>
+
+    <div class="tab-content" id="tabContentGpx">
+      <p style="font-size:10.5px;color:var(--text2);margin:0 0 10px;">
+        Geocodifica fotos usando um trajeto GPX: casa o horário de cada foto
+        com o ponto do GPX mais próximo no tempo e grava a coordenada (e
+        altitude, se o GPX tiver) direto no EXIF.
+      </p>
+
+      <div class="elem-dropzone elem-compact" id="gpxDropPhotos">
+        <div class="elem-dz-left">
+          <div class="elem-dz-icon">📷</div>
+          <div class="elem-dz-text">
+            <b>Arraste as fotos aqui</b>
+            <span id="gpxPhotosCount">Nenhuma foto ainda</span>
+          </div>
+        </div>
+        <div class="elem-dz-buttons">
+          <button class="elem-btn primary" id="gpxBtnChoosePhotos" type="button">Escolher fotos</button>
+        </div>
+        <input type="file" id="gpxPhotosInput" accept="image/*" multiple style="display:none">
+      </div>
+
+      <div class="elem-dropzone elem-compact" id="gpxDropTrack" style="margin-top:8px;">
+        <div class="elem-dz-left">
+          <div class="elem-dz-icon">🛰</div>
+          <div class="elem-dz-text">
+            <b>Arraste o arquivo .gpx aqui</b>
+            <span id="gpxTrackLabel">Nenhum trajeto ainda</span>
+          </div>
+        </div>
+        <div class="elem-dz-buttons">
+          <button class="elem-btn primary" id="gpxBtnChooseTrack" type="button">Escolher .gpx</button>
+        </div>
+        <input type="file" id="gpxTrackInput" accept=".gpx" style="display:none">
+      </div>
+
+      <div class="gpx-offset-row">
+        <label for="gpxOffsetInput">Fuso do relógio da câmera (horas, relativo ao UTC)</label>
+        <input type="number" id="gpxOffsetInput" value="-3" step="0.5" min="-14" max="14">
+      </div>
+      <p class="gpx-offset-hint">O GPX grava os horários em UTC; a câmera grava no horário local do fuso onde foi ajustada — se as fotos caírem no lugar errado do trajeto, ajuste esse número.</p>
+
+      <button class="elem-btn primary" id="gpxProcessBtn" type="button" style="width:100%;" disabled>📍 Processar</button>
+
+      <div id="gpxResults"></div>
+
+      <div class="gpx-download-bar" id="gpxDownloadBar" style="display:none;">
+        <button class="elem-btn primary" id="gpxDownloadBtn" type="button" style="width:100%;">⬇ BAIXAR FOTOS COM GPS</button>
+        <button class="elem-btn" id="gpxClearBtn" type="button" style="width:100%;margin-top:6px;">✕ Limpar</button>
+      </div>
+    </div>
+
+    <div class="tab-content" id="tabContentInspecoes">
+      <p style="font-size:10.5px;color:var(--text2);margin:0 0 10px;">
+        Monta a rota de cada equipe pelos códigos das OAEs (busca nas camadas
+        KML já carregadas no mapa) — cada código vira uma parada, na ordem em
+        que for adicionado. Arraste ou use as setas pra reordenar.
+      </p>
+
+      <div id="inspTeamsList"></div>
+      <button class="elem-btn primary" id="inspAddTeamBtn" type="button" style="width:100%;">+ Nova equipe</button>
+
+      <div class="insp-export-row">
+        <button class="btn-export" id="inspExportSelectedBtn" type="button" title="Baixar KML só da equipe selecionada">⬇ KML EQUIPE</button>
+        <button class="btn-export" id="inspExportAllBtn" type="button" title="Baixar KML de todas as equipes">⬇ KML TODAS</button>
+      </div>
+    </div>
+
+    <div class="export-bar" id="exportBar">
+      <button class="btn-export-single" id="exportSelectedBtn" onclick="exportSelectedPhotos()" style="display:none;" title="Baixar as fotos marcadas com a caixinha">⬇ BAIXAR SELECIONADAS (<span id="selectedPhotosCount">0</span>)</button>
+      <button class="btn-export" id="exportAllBtn" onclick="exportAllSmart()">⬇ EXPORTAR TUDO</button>
+    </div>
+  </div>
+
+  <button class="mobile-view-toggle" id="mobileViewToggle" onclick="toggleMobileMapView()" type="button">🗺 Mapa</button>
+
+  <div class="map-container">
+    <div class="empty-map" id="emptyState">
+      <div class="empty-map-text">ENVIAR<br>FOTOS</div>
+      <div class="empty-map-sub">As coordenadas de GPS aparecerão no mapa</div>
+    </div>
+    <div class="map-search-bar">
+      <div class="map-search-pill">
+        <span class="kml-search-icon">🔍</span>
+        <input type="text" id="kmlSearchInput" class="kml-search-input"
+          placeholder="Buscar ponto no KML..." autocomplete="off" spellcheck="false"
+          style="flex:1;background:transparent;border:none;outline:none;color:var(--text);font-family:var(--mono);font-size:11px;letter-spacing:0.5px;padding:10px 0;">
+        <button class="kml-search-clear" id="kmlSearchClear" title="Limpar" style="display:none;">✕</button>
+      </div>
+      <div class="kml-search-results" id="kmlSearchResults"></div>
+    </div>
+    <div id="map">
+
+    </div>
+    <div class="measure-banner" id="measureBanner">📏 Clique para marcar pontos · ESC para cancelar</div>
+<div class="dup-gps-popup" id="dupGpsPopup">
+  <span class="dup-gps-icon">📍</span>
+  <div class="dup-gps-title">GPS duplicado detectado</div>
+  <div class="dup-gps-count" id="dupGpsCount"></div>
+  <div class="dup-gps-sub">fotos com coordenadas idênticas</div>
+  <div class="dup-gps-slider-wrap">
+    <div class="dup-gps-slider-label">Dispersão: <span class="dup-gps-slider-val" id="dupGpsSliderVal">5m</span></div>
+    <input type="range" class="dup-gps-slider" id="dupGpsSlider" min="1" max="50" value="5" step="1">
+  </div>
+  <div class="dup-gps-btn-row">
+    <button class="dup-gps-btn primary" onclick="randomizeDupGps()">⇄ DISPERSAR</button>
+    <button class="dup-gps-btn ghost" onclick="closeDupGpsPopup()">IGNORAR</button>
+  </div>
+</div>
+
+
+<div class="picking-banner" id="pickingBanner">📍 Clique no mapa para definir a nova localização &nbsp;·&nbsp; ESC para cancelar</div>
+
+
+
+    <!-- KML DROP OVERLAY -->
+    <div class="kml-drop-overlay" id="kmlDropOverlay">
+      <div class="kml-drop-msg" id="kmlDropMsg">SOLTAR KML<br>NO MAPA</div>
+    </div>
+
+    <!-- KML PROGRESS -->
+    <div class="kml-progress" id="kmlProgress">
+      <div class="kml-progress-label">Carregando <span id="kmlFileName">KML</span>...</div>
+      <div class="kml-progress-bar"><div class="kml-progress-fill" id="kmlProgressFill"></div></div>
+    </div>
+
+    <!-- COMPASS ROSE -->
+    <div class="compass-rose" id="compassRose" title="Arraste para girar · Clique para voltar ao norte">
+      <svg viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg" class="compass-svg">
+        <!-- Outer ring -->
+        <circle cx="40" cy="40" r="38" fill="rgba(10,10,10,0.75)" stroke="rgba(212,245,60,0.3)" stroke-width="1"/>
+        <!-- N arrow (red/accent) -->
+        <polygon points="40,6 45,36 40,32 35,36" fill="#d4f53c"/>
+        <!-- S arrow (grey) -->
+        <polygon points="40,74 45,44 40,48 35,44" fill="#555"/>
+        <!-- E arrow -->
+        <polygon points="74,40 44,35 48,40 44,45" fill="#444"/>
+        <!-- W arrow -->
+        <polygon points="6,40 36,35 32,40 36,45" fill="#444"/>
+        <!-- Center dot -->
+        <circle cx="40" cy="40" r="4" fill="#d4f53c"/>
+        <!-- N label -->
+        <text x="40" y="20" text-anchor="middle" font-family="monospace" font-size="9" font-weight="bold" fill="#d4f53c">N</text>
+      </svg>
+      <div class="compass-bearing" id="compassBearing">0°</div>
+    </div>
+
+    <!-- ROTATE CONTROLS -->
+    <div class="rotate-controls">
+      <button class="rotate-btn" id="rotateLeft"  title="Girar 15° à esquerda">↺</button>
+      <button class="rotate-btn reset" id="rotateReset" title="Voltar ao norte">⊕</button>
+      <button class="rotate-btn" id="rotateRight" title="Girar 15° à direita">↻</button>
+    </div>
+
+    <div class="map-overlay">
+      <button class="map-btn" id="fitAllBtn" style="display:none" onclick="fitAll()">⊡ AGRUPAR</button>
+      <button class="map-btn" id="clearBtn" style="display:none" onclick="clearAll()">✕ LIMPAR</button>
+      <button class="map-btn" id="measureBtn" onclick="toggleMeasure()" title="Medir distância">📏 MEDIR</button>
+      <button class="map-btn" id="snvBtn" onclick="alignToSNV()" title="Alinhar mapa ao sentido da rodovia (LD_INICIO_OAE)">🧭 SNV</button>
+      <button class="map-btn" id="svBtn" onclick="openGoogleMaps()" title="Abrir Google Maps no ponto selecionado">🗺 GOOGLE MAPS</button>
+    </div>
+
+    <!-- DNIT LAYER PANEL -->
+    <div class="layer-panel">
+      <div class="layer-panel-header" onclick="toggleLayerPanel()">
+        <div class="layer-panel-title">
+          <div class="layer-dot"></div>
+          DNIT · Camadas
+        </div>
+        <span class="layer-toggle-arrow open" id="layerArrow">▲</span>
+      </div>
+      <div class="layer-list open" id="layerList">
+
+        <!-- KML IMPORT SECTION -->
+        <div class="layer-item" onclick="document.getElementById('kmlFileInput').click()" style="border-bottom:1px solid var(--border)">
+          <div class="layer-check" style="background:none;border-color:#555;color:#888;font-size:14px;">+</div>
+          <div class="layer-info">
+            <div class="layer-name">Importar KML / KMZ</div>
+            <div class="layer-desc">Clique ou arraste para o mapa</div>
+          </div>
+        </div>
+        <input type="file" id="kmlFileInput" accept=".kml,.kmz" style="display:none" multiple>
+
+        <!-- PHOTO IMPORT FROM MAP PANEL -->
+        <div class="layer-item" onclick="document.getElementById('mapPhotoInput').click()" style="border-bottom:1px solid var(--border)">
+          <div class="layer-check" style="background:none;border-color:#555;color:#888;font-size:14px;">📷</div>
+          <div class="layer-info">
+            <div class="layer-name">Importar Fotos</div>
+            <div class="layer-desc">Clique ou arraste para o mapa</div>
+          </div>
+        </div>
+        <input type="file" id="mapPhotoInput" accept="image/*" style="display:none" multiple>
+
+        <!-- AUTO-LOAD FROM FOLDER -->
+        <div class="layer-item" id="autoLoadFolderBtn" onclick="autoLoadKmlFromFolder()" style="border-bottom:1px solid var(--border)">
+          <div class="layer-check" style="background:none;border-color:#555;color:#888;font-size:14px;">📂</div>
+          <div class="layer-info">
+            <div class="layer-name">Carregar KML da Pasta</div>
+            <div class="layer-desc" id="autoLoadDesc">Seleciona pasta — carrega KML/KMZ automaticamente</div>
+          </div>
+        </div>
+        <div id="kmlLayerList"></div>
+
+        <!-- ORIENTATION LAYERS -->
+        <div style="padding:6px 10px 4px;font-family:var(--mono);font-size:8px;letter-spacing:2px;color:var(--accent);border-top:1px solid var(--border);margin-top:4px;">ORIENTAÇÃO</div>
+
+        <div class="layer-item" id="layerCities" onclick="toggleOrientLayer('cities')">
+          <div class="layer-check" id="checkCities" style="background:none;border-color:#555;font-size:10px;color:#888;">○</div>
+          <div class="layer-info">
+            <div class="layer-name">Cidades &amp; Estados</div>
+            <div class="layer-desc">Nomes de municípios e divisas</div>
+          </div>
+        </div>
+
+        <div class="layer-item" id="layerRoads" onclick="toggleOrientLayer('roads')">
+          <div class="layer-check" id="checkRoads" style="background:none;border-color:#555;font-size:10px;color:#888;">○</div>
+          <div class="layer-info">
+            <div class="layer-name">Rodovias</div>
+            <div class="layer-desc">Estradas e números de rodovias</div>
+          </div>
+        </div>
+
+        <div class="layer-item" id="layerHybrid" onclick="toggleOrientLayer('hybrid')">
+          <div class="layer-check" id="checkHybrid" style="background:none;border-color:#555;font-size:10px;color:#888;">○</div>
+          <div class="layer-info">
+            <div class="layer-name">Híbrido Completo</div>
+            <div class="layer-desc">Cidades + rodovias + limites</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+    <!-- PHOTO PROCESSING BAR -->
+    <div class="proc-bar-wrap" id="procBarWrap" style="display:none">
+      <div class="proc-bar-fill" id="procBarFill"></div>
+      <div class="proc-bar-label" id="procBarLabel">Processando fotos...</div>
+      <div class="proc-bar-bridge" aria-hidden="true">
+        <svg viewBox="0 0 100 10" preserveAspectRatio="none">
+          <line class="pbb-deck" x1="0" y1="8" x2="100" y2="8"/>
+          <g class="pbb-car"><rect x="-3" y="3.6" width="6" height="3.2" rx="1"/></g>
+        </svg>
+      </div>
+    </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- PHOTO ISSUES ALERT (No GPS / Low MP / 29MB or more) -->
+<div class="issues-alert-overlay" id="issuesAlertOverlay" onclick="closeIssuesAlert(event)">
+  <div class="issues-alert-box">
+    <span class="issues-alert-icon">⚠️</span>
+    <div class="issues-alert-title">ATENÇÃO</div>
+    <div class="issues-alert-list" id="issuesAlertList"></div>
+
+    <div class="issues-alert-actions" id="issuesAlertActions">
+      <button class="issues-alert-action-btn" id="mpUpscaleBtn" onclick="upscaleLowMpPhotos()">⬆ REDIMENSIONAR PARA 12MP</button>
+      <button class="issues-alert-action-btn" id="sizeCompressBtn" onclick="compressOverSizePhotos()">🗜 COMPACTAR PARA &lt;29MB</button>
+    </div>
+
+    <div class="issues-upscale-progress" id="mpUpscaleProgress" style="display:none">
+      <div class="issues-progress-bar-wrap"><div class="issues-progress-bar" id="mpUpscaleBar"></div></div>
+      <div class="issues-progress-label" id="mpUpscaleLabel">Processando...</div>
+    </div>
+    <div class="issues-upscale-progress" id="sizeCompressProgress" style="display:none">
+      <div class="issues-progress-bar-wrap"><div class="issues-progress-bar" id="sizeCompressBar"></div></div>
+      <div class="issues-progress-label" id="sizeCompressLabel">Processando...</div>
+    </div>
+
+    <button class="issues-alert-close" onclick="closeIssuesAlert()">OK, ENTENDI</button>
+  </div>
+</div>
+
+<!-- EXPORT OVERLAY -->
+<div class="export-overlay" id="exportOverlay">
+  <div class="export-overlay-box">
+    <div class="export-overlay-bridge" aria-hidden="true">
+      <svg viewBox="0 0 200 60" xmlns="http://www.w3.org/2000/svg">
+        <line class="eob-tower" x1="40" y1="8" x2="40" y2="46"/>
+        <line class="eob-tower" x1="160" y1="8" x2="160" y2="46"/>
+        <path class="eob-cable" d="M8,46 Q40,14 72,46"/>
+        <path class="eob-cable" d="M72,46 Q100,30 128,46"/>
+        <path class="eob-cable" d="M128,46 Q160,14 192,46"/>
+        <line class="eob-hanger" x1="24" y1="46" x2="24" y2="30"/>
+        <line class="eob-hanger" x1="56" y1="46" x2="56" y2="26"/>
+        <line class="eob-hanger" x1="88" y1="46" x2="88" y2="37"/>
+        <line class="eob-hanger" x1="112" y1="46" x2="112" y2="37"/>
+        <line class="eob-hanger" x1="144" y1="46" x2="144" y2="26"/>
+        <line class="eob-hanger" x1="176" y1="46" x2="176" y2="30"/>
+        <line class="eob-deck" x1="4" y1="46" x2="196" y2="46"/>
+        <rect class="eob-seg eob-seg-1" x="4"   y="48" width="32" height="4" rx="1"/>
+        <rect class="eob-seg eob-seg-2" x="36"  y="48" width="32" height="4" rx="1"/>
+        <rect class="eob-seg eob-seg-3" x="68"  y="48" width="32" height="4" rx="1"/>
+        <rect class="eob-seg eob-seg-4" x="100" y="48" width="32" height="4" rx="1"/>
+        <rect class="eob-seg eob-seg-5" x="132" y="48" width="32" height="4" rx="1"/>
+        <rect class="eob-seg eob-seg-6" x="164" y="48" width="32" height="4" rx="1"/>
+        <g class="eob-car"><rect x="-6" y="38" width="12" height="6" rx="1.6"/></g>
+      </svg>
+    </div>
+    <div class="export-overlay-title">EXPORTANDO</div>
+    <div class="export-overlay-sub" id="exportOverlaySub">Preparando as fotos...</div>
+    <div class="export-progress-bar">
+      <div class="export-progress-fill" id="exportProgressFill"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===========================================================================
+     Application scripts.
+
+     These are plain (classic) scripts, NOT modules, so they all share one
+     global scope -- exactly like the previous single script.js build. That is
+     deliberate: the app reassigns shared globals across files (activeId,
+     _pickingForId, ...), which ES modules would not allow.
+
+     LOAD ORDER MATTERS. The files are numbered; keep them in this order.
+     Concatenating them in this order reproduces the original program.
+     =========================================================================== -->
+<script src="js/00-core.js?v=39" defer></script>
+<script src="js/01-map-core.js?v=39" defer></script>
+<script src="js/02-orientation-layers.js?v=39" defer></script>
+<script src="js/03-state.js?v=39" defer></script>
+<script src="js/04-photos.js?v=39" defer></script>
+<script src="js/05-photo-markers.js?v=39" defer></script>
+<script src="js/06-export.js?v=39" defer></script>
+<script src="js/07-map-ui.js?v=39" defer></script>
+<script src="js/08-kml.js?v=39" defer></script>
+<script src="js/09-tabs-bulk.js?v=39" defer></script>
+<script src="js/10-interactions.js?v=39" defer></script>
+<script src="js/11-photo-fixes.js?v=39" defer></script>
+<script src="js/12-search-pontos.js?v=39" defer></script>
+<script src="js/13-sorting.js?v=39" defer></script>
+<script src="js/14-tools.js?v=39" defer></script>
+<script src="js/15-routes.js?v=39" defer></script>
+<script src="js/16-medidas.js?v=39" defer></script>
+<script src="js/17-elementos.js?v=39" defer></script>
+<script src="js/18-nomes.js?v=39" defer></script>
+<script src="js/19-boot.js?v=39" defer></script>
+<script src="js/20-fotos-superiores.js?v=39" defer></script>
+<script src="js/21-municipios-br.js?v=39" defer></script>
+<script src="js/22-gpx.js?v=39" defer></script>
+<script src="js/23-inspecoes.js?v=39" defer></script>
+</body>
+</html>

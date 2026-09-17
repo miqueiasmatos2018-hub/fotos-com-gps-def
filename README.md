@@ -1,1 +1,0 @@
-# Fotos-com-GPS-TESTES

@@ -46,8 +46,8 @@ window.switchTab = function(tab) {
   // floating sidebar controls (like the collapse toggle) that sit at a
   // higher z-index than the overlay would otherwise poke through on top
   // of it -- this class lets CSS hide them specifically for these tabs.
-  document.body.classList.toggle('fullscreen-tab-active', tab === 'elementos' || tab === 'nomes');
-  ['photos','pontos','rotas','medidas','elementos','nomes','gpx','inspecoes'].forEach(t => {
+  document.body.classList.toggle('fullscreen-tab-active', tab === 'elementos' || tab === 'nomes' || tab === 'conferencia');
+  ['photos','pontos','rotas','medidas','elementos','nomes','gpx','inspecoes','conferencia'].forEach(t => {
     const btn = document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1));
     const content = document.getElementById('tabContent' + t.charAt(0).toUpperCase() + t.slice(1));
     if (btn)     btn.classList.toggle('active',     t === tab);

@@ -587,9 +587,11 @@
     }
 
     #tabContentElementos.active,
-    #tabContentNomes.active { padding: 14px; }
+    #tabContentNomes.active,
+    #tabContentConferencia.active { padding: 14px; }
     .elem-titleblock,
-    .nomes-titleblock { padding: 12px; }
+    .nomes-titleblock,
+    .conf-titleblock { padding: 12px; }
 
     /* Popups sized for desktop overflow a ~360px-wide phone. */
     .export-overlay-box { min-width: 0; width: 88%; max-width: 320px; padding: 22px 20px; }
@@ -1404,6 +1406,184 @@
     padding: 7px 12px;
   }
   .nomes-btn.nomes-copy-dims:hover { background: #e2ff6b; border-color: #e2ff6b; }
+
+  /* CONFERÊNCIA TAB -- checks a local folder (synced from Dropbox as
+     01_CADASTRAL) against the required cadastral folder/file structure.
+     Same fullscreen-overlay treatment as Elementos/Nomes above, and the
+     same conf- prefix convention documented in js/24-conferencia.js. */
+  #tabContentConferencia { display: none; flex-direction: column; overflow-y: auto; padding: 12px; gap: 12px; }
+  #tabContentConferencia.active {
+    display: flex;
+    position: fixed;
+    top: var(--header-h, 68px);
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 1050;
+    background: var(--bg);
+    padding: 20px 28px;
+  }
+  #tabContentConferencia .conf-titleblock,
+  #tabContentConferencia .conf-dropzone,
+  #tabContentConferencia .conf-summary-row,
+  #tabContentConferencia #confResults,
+  #tabContentConferencia .conf-empty-state {
+    max-width: 1100px;
+    width: 100%;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .conf-titleblock {
+    position: relative;
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 6px;
+    background: rgba(255,255,255,0.02);
+    padding: 12px 14px;
+  }
+  .conf-tb-corner-tr, .conf-tb-corner-br { display: none; }
+  .conf-eyebrow {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.15em;
+    color: var(--accent);
+    text-transform: uppercase;
+    margin: 0 0 4px;
+  }
+  .conf-h1 { margin: 0; font-size: 15px; font-weight: 700; color: #ffffff; }
+  .conf-subtitle { margin: 6px 0 0; color: var(--text2); font-size: 11px; line-height: 1.5; max-width: 64ch; }
+
+  .conf-dropzone {
+    margin-top: 18px;
+    border: 2px dashed var(--border2);
+    background: rgba(255,255,255,0.015);
+    border-radius: 6px;
+    padding: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    text-align: left;
+    transition: border-color 0.15s, background 0.15s;
+    cursor: pointer;
+  }
+  .conf-dropzone.conf-drag { border-color: var(--accent); background: var(--accent-glow); }
+  .conf-dz-left { display: flex; align-items: center; gap: 12px; }
+  .conf-dz-icon {
+    width: 34px; height: 34px; flex: none;
+    border: 1.5px solid var(--border2);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 15px;
+  }
+  .conf-dz-text b { display: block; font-size: 12px; color: #ffffff; font-weight: 700; }
+  .conf-dz-text span { display: block; font-size: 10px; color: var(--text2); margin-top: 3px; }
+  .conf-dz-buttons { display: flex; gap: 10px; flex-wrap: wrap; }
+
+  .conf-btn {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    background: rgba(255,255,255,0.04);
+    color: var(--text2);
+    border: 1px solid var(--border2);
+    padding: 10px 16px;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+  .conf-btn:hover { border-color: var(--accent); color: #ffffff; }
+  .conf-btn.primary { background: var(--accent); border-color: var(--accent); color: #0a0a0a; }
+  .conf-btn.primary:hover { background: #e2ff6b; border-color: #e2ff6b; }
+
+  .conf-summary-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 16px;
+  }
+  .conf-summary-pill {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text2);
+    border: 1px solid var(--border2);
+    border-radius: 20px;
+    padding: 5px 12px;
+    background: rgba(255,255,255,0.03);
+  }
+  .conf-summary-pill b { font-size: 13px; color: #ffffff; }
+  .conf-summary-ok b { color: #4caf50; }
+  .conf-summary-warn b { color: #ff9800; }
+  .conf-summary-fail b { color: #f44336; }
+  .conf-summary-folder { margin-left: auto; font-family: var(--mono); font-size: 10px; color: var(--text2); }
+
+  #confResults { margin-top: 18px; display: flex; flex-direction: column; gap: 10px; }
+  .conf-item {
+    position: relative;
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--border2);
+    border-radius: 6px;
+    background: rgba(255,255,255,0.02);
+    padding: 10px 14px;
+  }
+  .conf-item.conf-ok { border-left-color: #4caf50; }
+  .conf-item.conf-warn { border-left-color: #ff9800; }
+  .conf-item.conf-fail { border-left-color: #f44336; }
+  .conf-item-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .conf-item-icon { font-size: 13px; line-height: 1; flex-shrink: 0; }
+  .conf-item.conf-ok .conf-item-icon::before { content: '✔'; color: #4caf50; }
+  .conf-item.conf-warn .conf-item-icon::before { content: '⚠'; color: #ff9800; }
+  .conf-item.conf-fail .conf-item-icon::before { content: '✖'; color: #f44336; }
+  .conf-item-title { font-size: 12px; font-weight: 700; color: #ffffff; }
+  .conf-item-path { margin-left: auto; font-family: var(--mono); font-size: 9px; color: var(--text2); white-space: nowrap; }
+  .conf-item-detail { margin: 6px 0 0; font-family: var(--mono); font-size: 10.5px; color: var(--text2); line-height: 1.6; }
+  .conf-item-detail ul { margin: 4px 0 0; padding-left: 18px; }
+  .conf-item-detail li { margin: 2px 0; }
+  .conf-item-sub { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 6px; }
+  .conf-sub-row { display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 10.5px; }
+  .conf-sub-row .conf-item-icon { font-size: 11px; }
+  .conf-sub-row.conf-ok { color: var(--text2); }
+  .conf-sub-row.conf-warn { color: #ffb74d; }
+  .conf-sub-row.conf-fail { color: #ef9a9a; }
+
+  .conf-empty-state { margin-top: 30px; text-align: center; color: var(--text2); font-family: var(--mono); font-size: 11px; }
+  .conf-empty-state .conf-big { font-size: 12px; color: #ffffff; margin-bottom: 4px; }
+
+  /* Header tab-icon animation: clipboard with three checkmarks, ticking in
+     sequence -- reuses the same idle-pulse language as the other tab icons. */
+  .tab-anim-conferencia .conf-clip-body,
+  .tab-anim-conferencia .conf-clip-top { fill: none; stroke: var(--text2); stroke-width: 1.6; }
+  .tab-anim-conferencia.active .conf-clip-body,
+  .tab-anim-conferencia.active .conf-clip-top { stroke: var(--accent); }
+  .tab-anim-conferencia .conf-line { stroke: var(--border2); stroke-width: 1.6; stroke-linecap: round; }
+  .tab-anim-conferencia .conf-check {
+    fill: none;
+    stroke: #4caf50;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-dasharray: 10;
+    stroke-dashoffset: 10;
+    opacity: 0;
+  }
+  .tab-anim-conferencia.active .conf-check-1 { animation: conf-tick 3.6s ease-in-out infinite; animation-delay: 0.1s; }
+  .tab-anim-conferencia.active .conf-check-2 { animation: conf-tick 3.6s ease-in-out infinite; animation-delay: 0.6s; }
+  .tab-anim-conferencia.active .conf-check-3 { animation: conf-tick 3.6s ease-in-out infinite; animation-delay: 1.1s; }
+  @keyframes conf-tick {
+    0% { opacity: 0; stroke-dashoffset: 10; }
+    12% { opacity: 1; }
+    28%, 80% { opacity: 1; stroke-dashoffset: 0; }
+    92%, 100% { opacity: 0; stroke-dashoffset: 0; }
+  }
 
   .medidas-barrier-toggle {
     display: flex;

@@ -1173,13 +1173,14 @@ function _hexToKmlColor(hex, opacity) {
   return (a + b + g + r).toLowerCase();
 }
 
-window.exportRoutesKML = function() {
-  const ready = Object.entries(ROUTES).filter(([, r]) => r.waypoints.length >= 2);
-  if (!ready.length && !LD_INICIO_POINTS.length) {
-    showToast('Adicione ao menos 2 paradas em uma rota antes de exportar');
-    return;
-  }
-
+// ─── BUILDERS (sem download próprio) ────────────────────────────────────
+// _buildRouteKmlFile/_buildRouteImageFile/_buildRouteCsvFile são
+// builders que só MONTAM o arquivo (KML/CSV/JPG) e devolvem {blob,
+// fileName}, sem chamar triggerDownload cada um por conta própria. Quem
+// decide COMO salvar (pasta escolhida uma vez via File System Access API,
+// ou downloads soltos como alternativa) é downloadRoute(), mais abaixo --
+// o botão único "BAIXAR ROTA" da aba.
+function _buildRouteKmlFile(ready) {
   const routePlacemarks = ready.map(([key, r]) => {
     // Prefer the actual road-snapped geometry; fall back to straight lines
     // between stops if OSRM hasn't resolved yet (still exports something).
@@ -1222,23 +1223,23 @@ ${routePlacemarks}${routePlacemarks && ldPlacemarks ? '\n' : ''}${ldPlacemarks}
   const safeMiddle = middle.replace(/[\\/:*?"<>|]/g, '_'); // strip chars illegal in filenames
   const fileName = safeMiddle ? `ROTA_ALTERNATIVA_${safeMiddle}.kml` : 'ROTA_ALTERNATIVA.kml';
 
-  triggerDownload(new Blob([kml], { type: 'application/vnd.google-earth.kml+xml' }), fileName);
-  // Pequeno atraso antes do segundo download: dois cliques automáticos em
-  // sequência imediata levam alguns navegadores a bloquear o segundo como
-  // se fosse pop-up. 400ms é suficiente e imperceptível para quem clicou.
-  setTimeout(() => _exportRouteTrajetoDiffCSV(safeMiddle), 400);
   const parts = [];
   if (ready.length) parts.push(`${ready.length} rota${ready.length > 1 ? 's' : ''}`);
   if (LD_INICIO_POINTS.length) parts.push(`${LD_INICIO_POINTS.length} ponto${LD_INICIO_POINTS.length > 1 ? 's' : ''} LD_INICIO_OAE`);
-  showToast(`⬇ <span class="accent">${parts.join(' + ')}</span> exportado(s)`);
-};
 
-// Chamado só pelo exportRoutesKML() acima, logo depois do KML -- exporta o
-// mesmo texto que já está na tela em TRAJETO: / DIFERENÇA (KM): (sem
+  return {
+    blob: new Blob([kml], { type: 'application/vnd.google-earth.kml+xml' }),
+    fileName,
+    safeMiddle,
+    summary: parts.join(' + ')
+  };
+}
+
+// Mesmo texto que já está na tela em TRAJETO: / DIFERENÇA (KM): (sem
 // recalcular nada, mesmo padrão usado por copyRouteTrajeto()/
-// copyRouteDiffKm()). Se nenhum dos dois estiver pronto ainda, não gera um
-// CSV vazio -- o KML acima já saiu normalmente de qualquer forma.
-function _exportRouteTrajetoDiffCSV(safeMiddle) {
+// copyRouteDiffKm()). Se nenhum dos dois estiver pronto ainda, devolve
+// null -- não faz sentido um CSV vazio.
+function _buildRouteCsvFile(safeMiddle) {
   const trajetoEl = document.getElementById('routeTrajetoValue');
   const diffEl = document.getElementById('routeDiffValue');
   const trajeto = trajetoEl ? trajetoEl.textContent.trim() : '';
@@ -1249,7 +1250,7 @@ function _exportRouteTrajetoDiffCSV(safeMiddle) {
 
   const trajetoReady = trajeto && trajeto !== '—' && trajeto !== '…';
   const diffReady = diff && diff !== '—' && diff !== '…';
-  if (!trajetoReady && !diffReady) return;
+  if (!trajetoReady && !diffReady) return null;
 
   const esc = v => (/[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v);
   const lines = [
@@ -1258,9 +1259,8 @@ function _exportRouteTrajetoDiffCSV(safeMiddle) {
   ];
   // BOM no início -- sem ele o Excel abre acentos/ç quebrados em CSV UTF-8.
   const csv = '\uFEFF' + lines.join('\r\n');
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
   const fileName = safeMiddle ? `ROTA_ALTERNATIVA_${safeMiddle}_trajeto.csv` : 'ROTA_ALTERNATIVA_trajeto.csv';
-  triggerDownload(blob, fileName);
+  return { blob: new Blob([csv], { type: 'text/csv;charset=utf-8' }), fileName };
 }
 
 // ─── REIMPORTAR (restaurar paradas de um KML exportado antes por esta
@@ -1268,7 +1268,7 @@ function _exportRouteTrajetoDiffCSV(safeMiddle) {
 // O <coordinates> visível de cada rota é a linha inteira ajustada às ruas
 // (às vezes centenas de pontos) -- reimportar isso como "paradas" lotaria
 // a lista de paradas com pontos que a pessoa nunca colocou ali. Por isso
-// exportRoutesKML() também grava as paradas originais em
+// _buildRouteKmlFile() também grava as paradas originais em
 // <ExtendedData><Data name="stops">; é isso que lemos aqui. Um KML mais
 // antigo (exportado antes dessa mudança) não tem esse campo -- nesse caso,
 // caímos de volta para ler a própria linha como lista de paradas (funciona,
@@ -1396,7 +1396,7 @@ window.importRoutesKML = async function(file) {
 // then exporting that canvas as a JPG) possible at all client-side.
 const ROUTE_IMAGE_WIDTH = 2000;
 const ROUTE_IMAGE_HEIGHT = 1250; // ~16:10, matching the reference export's proportions
-const ROUTE_IMAGE_PADDING_FRACTION = 0.12; // breathing room around the routes/marker
+const ROUTE_IMAGE_PADDING_FRACTION = 0.05; // breathing room around the routes/marker -- era 0.12 (enquadramento bem mais largo que o necessário)
 const ESRI_WORLD_IMAGERY_EXPORT_URL = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export';
 // "Hybrid" reference overlays (transparent PNG, roads+labels / place names)
 // drawn on top of the satellite base -- the Esri layers behind the
@@ -1619,31 +1619,6 @@ function _computeMercatorBBoxForImage(points) {
     xmin = cx - newW / 2; xmax = cx + newW / 2;
   }
 
-  return { xmin, ymin, xmax, ymax };
-}
-
-// Same aspect-ratio-fitting step as above, but starting from the live
-// map's current bounds (post fitBounds) instead of computing padding from
-// the raw route points independently -- see the call site in
-// exportRoutesImage for why.
-function _computeMercatorBBoxFromBounds(bounds) {
-  const sw = bounds.getSouthWest(), ne = bounds.getNorthEast();
-  const m1 = _lngLatToMercatorXY(sw.lng, sw.lat);
-  const m2 = _lngLatToMercatorXY(ne.lng, ne.lat);
-  let xmin = Math.min(m1.x, m2.x), xmax = Math.max(m1.x, m2.x);
-  let ymin = Math.min(m1.y, m2.y), ymax = Math.max(m1.y, m2.y);
-
-  const targetRatio = ROUTE_IMAGE_WIDTH / ROUTE_IMAGE_HEIGHT;
-  const curRatio = (xmax - xmin) / (ymax - ymin);
-  if (curRatio > targetRatio) {
-    const newH = (xmax - xmin) / targetRatio;
-    const cy = (ymin + ymax) / 2;
-    ymin = cy - newH / 2; ymax = cy + newH / 2;
-  } else {
-    const newW = (ymax - ymin) * targetRatio;
-    const cx = (xmin + xmax) / 2;
-    xmin = cx - newW / 2; xmax = cx + newW / 2;
-  }
   return { xmin, ymin, xmax, ymax };
 }
 
@@ -2029,19 +2004,273 @@ function _drawRouteImageAttribution(ctx, width, height) {
   ctx.restore();
 }
 
-// Único botão "⬇ BAIXAR ROTA": dispara o KML+CSV (instantâneo) e, em
-// seguida, a geração da imagem JPG (lenta -- busca satélite/rodovias e
-// desenha em canvas). O botão passa a mostrar o loading da ponte durante
-// essa segunda etapa, controlado dentro de exportRoutesImage() abaixo.
-window.downloadRoute = async function() {
-  exportRoutesKML();
-  await exportRoutesImage();
-};
+// Monta a imagem JPG (satélite + rodovias/cidades/rotas desenhadas por
+// cima). Builder puro, sem download próprio -- ver comentário no topo do
+// bloco de builders (_buildRouteKmlFile). Assume que `ready` já tem pelo
+// menos uma rota (quem chama garante isso antes). Lança em caso de falha
+// (rede, canvas etc.) -- quem chama decide o que fazer com o erro.
+async function _buildRouteImageFile(ready) {
+  const routePts = [];
+  ready.forEach(([, r]) => {
+    const coords = (r.roadCoords && r.roadCoords.length >= 2) ? r.roadCoords : r.waypoints;
+    coords.forEach(c => routePts.push({ lat: c.lat, lng: c.lng }));
+  });
 
-window.exportRoutesImage = async function() {
-  const ready = Object.entries(ROUTES).filter(([, r]) => r.waypoints.length >= 2);
-  if (!ready.length) {
-    showToast('Crie ao menos uma rota antes de gerar a imagem');
+  const allPoints = routePts.slice();
+  LD_INICIO_POINTS.forEach(p => allPoints.push(p));
+
+  // Recentraliza o mapa visível nas rotas -- só efeito colateral visual
+  // (o usuário vê o mapa "pular" para onde a imagem foi enquadrada).
+  // O enquadramento da IMAGEM em si NÃO vem mais daqui (ver comentário
+  // abaixo): usar map.getBounds() depois do fitBounds prendia o corte
+  // final ao nível de zoom inteiro mais próximo que o Leaflet escolhe --
+  // como o zoom só varia em potências de 2, o resultado real podia
+  // sobrar bem mais área ao redor da rota do que o padding pedido (até
+  // quase o dobro), sobrando muito espaço vazio na imagem exportada.
+  map.fitBounds(L.latLngBounds(allPoints.map(p => [p.lat, p.lng])), { padding: [60, 60], animate: false });
+
+  // Enquadramento da imagem: computado direto a partir dos pontos da(s)
+  // rota(s) + ROUTE_IMAGE_PADDING_FRACTION (não a partir do zoom do mapa
+  // ao vivo) -- corte contínuo e exato em vez de preso ao zoom inteiro
+  // mais próximo, então a imagem final fica bem mais próxima da rota.
+  // A imagem ainda vem do serviço de exportação da Esri, não de um
+  // screenshot do mapa: um screenshot literal do Leaflet não pode ser
+  // salvo em arquivo quando a camada base é o satélite/híbrido do
+  // Google -- os servidores de tile do Google não permitem leitura
+  // cross-origin do canvas, então o navegador recusa exportar um canvas
+  // que já desenhou um desses tiles ("tainted canvas", restrição de
+  // segurança, não um bug deste app). O endpoint da Esri é o
+  // equivalente compatível com CORS para essa mesma imagem.
+  const bbox = _computeMercatorBBoxForImage(allPoints);
+
+  // Whitelist de códigos de rodovia + os pontos onde cada uma começa:
+  // exatamente as que alguma das rotas construídas realmente percorre,
+  // vindo direto do próprio OSRM (mesma chamada que já alimenta o campo
+  // TRAJETO:) -- sem depender de Overpass, DNIT ou qualquer fonte
+  // externa de malha viária. Um trecho sem ref/nome no OSRM simplesmente
+  // não ganha tarja, o que é o resultado correto (nada pra rotular ali).
+  const [descA, descB] = await Promise.all([
+    (ROUTES.a.waypoints && ROUTES.a.waypoints.length >= 2) ? _fetchRouteDescription(ROUTES.a.waypoints) : Promise.resolve(null),
+    (ROUTES.b.waypoints && ROUTES.b.waypoints.length >= 2) ? _fetchRouteDescription(ROUTES.b.waypoints) : Promise.resolve(null)
+  ]);
+  const roadSegments = [
+    ...((descA && descA.segments) || []),
+    ...((descB && descB.segments) || [])
+  ];
+  const roadLookupFailed = !roadSegments.length;
+
+  // Base satellite (requested lossless so the only JPEG compression that
+  // ever happens is the final canvas.toBlob() below -- avoids the
+  // double-recompression quality loss of re-saving an already-JPEG base)
+  // and the cities inside the frame are independent of each other, so
+  // fetch both at once instead of one after another. City lookup is
+  // best-effort: if it fails, the image still generates with just the
+  // satellite + our own routes, and a toast at the end says so (instead
+  // of the image just quietly coming out without them).
+  let cityLookupFailed = false;
+  const [baseImg, transportationImg, placesImg, citiesRaw] = await Promise.all([
+    _fetchEsriMapImage(ESRI_WORLD_IMAGERY_EXPORT_URL, bbox, ROUTE_IMAGE_WIDTH, ROUTE_IMAGE_HEIGHT, { format: 'png24' }),
+    _fetchEsriMapImage(ESRI_TRANSPORTATION_EXPORT_URL, bbox, ROUTE_IMAGE_WIDTH, ROUTE_IMAGE_HEIGHT, { format: 'png32', transparent: true, dpi: 300 }).catch(err => {
+      console.warn('Esri World_Transportation overlay indisponível:', err);
+      return null;
+    }),
+    _fetchEsriMapImage(ESRI_BOUNDARIES_PLACES_EXPORT_URL, bbox, ROUTE_IMAGE_WIDTH, ROUTE_IMAGE_HEIGHT, { format: 'png32', transparent: true, dpi: 300 }).catch(err => {
+      console.warn('Esri World_Boundaries_and_Places overlay indisponível:', err);
+      return null;
+    }),
+    // Best-effort on top of the local IBGE dataset below -- not the
+    // primary source anymore, so its failure doesn't set
+    // cityLookupFailed (there's always at least the local list).
+    _fetchCitiesNearRoute(routePts).catch(err => {
+      console.warn('Overpass city lookup indisponível, seguindo só com a lista local de municípios:', err);
+      return [];
+    })
+  ]);
+  // Cities: the local IBGE municipality list (see 21-municipios-br.js)
+  // never depends on a network request, so it's the reliable baseline;
+  // Overpass is merged on top when it's reachable, mainly for named
+  // localities that aren't their own município. If neither the local
+  // lookup nor the merge produces anything, THAT'S the one real "city
+  // lookup failed" case worth telling the person about.
+  const citiesLocal = (typeof _municipiosBrNear === 'function')
+    ? _municipiosBrNear(_sampleRoutePoints(routePts, ROUTE_IMAGE_CITY_SAMPLES), ROUTE_IMAGE_CITY_RADIUS_M / 1000)
+    : [];
+  const citiesForImage = _pickCitiesForImage(
+    citiesLocal.map(_normalizeCityEntry).concat(citiesRaw.map(_normalizeCityEntry)).filter(Boolean)
+  );
+  if (!citiesForImage.length) cityLookupFailed = true;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = ROUTE_IMAGE_WIDTH;
+  canvas.height = ROUTE_IMAGE_HEIGHT;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(baseImg, 0, 0, ROUTE_IMAGE_WIDTH, ROUTE_IMAGE_HEIGHT);
+  // "Hybrid" road overlay (transparent PNG) -- drawn under our own route
+  // lines on purpose, same as the Overpass road tracing further down, so
+  // the route itself still stands out wherever it runs along a road
+  // this layer also draws.
+  if (transportationImg) ctx.drawImage(transportationImg, 0, 0, ROUTE_IMAGE_WIDTH, ROUTE_IMAGE_HEIGHT);
+
+  const project = (lat, lng) => {
+    const m = _lngLatToMercatorXY(lng, lat);
+    return [
+      (m.x - bbox.xmin) / (bbox.xmax - bbox.xmin) * ROUTE_IMAGE_WIDTH,
+      (bbox.ymax - m.y) / (bbox.ymax - bbox.ymin) * ROUTE_IMAGE_HEIGHT
+    ];
+  };
+
+  // Original (green) drawn first, alternative (red) on top -- matches
+  // the layering in the reference export.
+  ['b', 'a'].forEach(key => {
+    const r = ROUTES[key];
+    if (r.waypoints.length < 2) return;
+    const coords = (r.roadCoords && r.roadCoords.length >= 2) ? r.roadCoords : r.waypoints;
+    ctx.beginPath();
+    coords.forEach((c, i) => {
+      const [px, py] = project(c.lat, c.lng);
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    });
+    ctx.strokeStyle = r.color;
+    ctx.lineWidth = 4 * ROUTE_IMAGE_UI_SCALE;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.shadowColor = 'rgba(0,0,0,0.6)';
+    ctx.shadowBlur = 3 * ROUTE_IMAGE_UI_SCALE;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+  });
+
+  // Place-name overlay (city/place labels only) drawn AFTER the route
+  // lines, unlike the road overlay above -- a city name sitting right on
+  // the route is the normal case here, and hiding it under the route
+  // line would defeat the point of showing it at all.
+  if (placesImg) ctx.drawImage(placesImg, 0, 0, ROUTE_IMAGE_WIDTH, ROUTE_IMAGE_HEIGHT);
+
+  // Shared list of already-placed label boxes so highway shields, the
+  // LD_INICIO tag, and city names don't render stacked on top of each
+  // other when two of them would otherwise land in the same spot -- see
+  // _reserveLabelBox. Order matters a little: whichever draws first gets
+  // to keep its spot, later ones nudge around it.
+  const labelRegistry = [];
+
+  // Highway shields (BR-174, RR-342, RR-203...) drawn AFTER the route
+  // lines, directly at the coordinates where the route itself changes
+  // road -- see _highwaySegmentsWithLocations. Deduped by proximity so
+  // both routes sharing the same junction don't stack two identical
+  // shields on top of each other.
+  (function drawRouteHighwayShields() {
+    const s = ROUTE_IMAGE_UI_SCALE;
+    const placedByCode = {}; // code -> [px,py] already placed for THAT code -- different highways must never suppress each other, even at the same junction
+    roadSegments.forEach(seg => {
+      const [px, py] = project(seg.lat, seg.lng);
+      const placed = placedByCode[seg.code] || (placedByCode[seg.code] = []);
+      const tooClose = placed.some(([qx, qy]) => Math.hypot(px - qx, py - qy) < ROAD_LABEL_MIN_SPACING_PX * s);
+      if (tooClose) return;
+      placed.push([px, py]);
+      _drawRoadRefLabel(ctx, px, py, seg.code, labelRegistry);
+    });
+  })();
+
+  // Diagnostic trail for when the highway labels don't show up on the
+  // image: this prints exactly where it came up empty (no refs
+  // recognized in the route's own OSRM steps), instead of leaving that a
+  // mystery.
+  console.log('[ROTA IMG] trechos de rodovia na rota (código + onde começa):', roadSegments.map(s => s.code).join(', ') || '(nenhum)');
+  console.log('[ROTA IMG] municípios (lista local IBGE):', citiesLocal.length,
+    '+ Overpass:', citiesRaw.length, '=', citiesForImage.length, 'no rótulo final');
+
+  LD_INICIO_POINTS.forEach(p => {
+    const [px, py] = project(p.lat, p.lng);
+    _drawPinMarker(ctx, px, py, LD_INICIO_COLOR);
+    // O deslocamento do rótulo era em pixels fixos, então em outros
+    // tamanhos de saída ele descolava do alfinete.
+    _drawRouteImageLabel(ctx, px + 14 * ROUTE_IMAGE_UI_SCALE, py - 11 * ROUTE_IMAGE_UI_SCALE, 'LD_INICIO_OAE', labelRegistry);
+  });
+
+  citiesForImage.forEach(c => {
+    const [px, py] = project(c.lat, c.lon);
+    _drawCityMarker(ctx, px, py, c.uf ? `${c.name} - ${c.uf}` : c.name, labelRegistry);
+  });
+
+  const code = (ROUTES.a.nameMiddle || ROUTES.b.nameMiddle || '').trim();
+  _drawRouteImageTitle(ctx, code);
+  _drawRouteImageLegend(ctx, ready, LD_INICIO_POINTS.length > 0);
+  _drawRouteImageNorthArrow(ctx, ROUTE_IMAGE_WIDTH, ROUTE_IMAGE_HEIGHT);
+  _drawRouteImageScaleBar(ctx, bbox, ROUTE_IMAGE_WIDTH, ROUTE_IMAGE_HEIGHT);
+  _drawRouteImageAttribution(ctx, ROUTE_IMAGE_WIDTH, ROUTE_IMAGE_HEIGHT);
+
+  const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.95));
+  if (!blob) throw new Error('canvas.toBlob() não retornou nada');
+
+  const safeCode = code.replace(/[\\/:*?"<>|]/g, '_');
+  const fileName = safeCode ? `ROTA_ALTERNATIVA_${safeCode}.jpg` : 'ROTA_ALTERNATIVA.jpg';
+  const warnings = [];
+  if (roadLookupFailed) warnings.push('nenhuma rodovia identificada no trajeto -- imagem sem rótulos de via');
+  else warnings.push(`${roadSegments.length} rodovia(s) marcada(s)`);
+  if (cityLookupFailed) warnings.push('nenhum município encontrado perto da rota');
+  else warnings.push(`${citiesForImage.length} cidades marcadas`);
+  const warning = warnings.length ? ` (${warnings.join('; ')})` : '';
+
+  return { blob, fileName, warning };
+}
+
+// Salva os arquivos gerados (KML, CSV, JPG) escolhendo a pasta de destino
+// UMA VEZ via File System Access API -- mesmo padrão já usado em
+// 06-export.js/20-fotos-superiores.js/22-gpx.js -- em vez de um <a
+// download> por arquivo, que faz o navegador perguntar onde salvar (ou
+// disparar downloads soltos, um de cada vez) a cada arquivo da exportação.
+async function _saveRouteExportFiles(files) {
+  if (!files.length) return { saved: false, cancelled: false, toFolder: false };
+
+  if (window.showDirectoryPicker) {
+    let dirHandle;
+    try {
+      dirHandle = await window.showDirectoryPicker({
+        mode: 'readwrite',
+        startIn: 'downloads',
+        id: 'rotas-export'
+      });
+    } catch (e) {
+      if (e && e.name === 'AbortError') return { saved: false, cancelled: true, toFolder: false }; // cancelado pela pessoa
+      dirHandle = null; // sem permissão / API indisponível -> cai nos downloads soltos abaixo
+    }
+
+    if (dirHandle) {
+      try {
+        const used = new Set();
+        for (const f of files) {
+          const filename = makeUniqueName(f.fileName, used);
+          const fileHandle = await dirHandle.getFileHandle(filename, { create: true });
+          const writable = await fileHandle.createWritable();
+          await writable.write(f.blob);
+          await writable.close();
+        }
+        return { saved: true, cancelled: false, toFolder: true };
+      } catch (err) {
+        console.error('Exportação da rota para pasta falhou, caindo para downloads soltos:', err);
+      }
+    }
+  }
+
+  // Alternativa (Firefox/Safari, ou permissão negada): um <a download> por
+  // arquivo, com um pequeno intervalo entre cada um -- disparar vários
+  // downloads no mesmo instante faz o navegador bloquear ou juntar tudo.
+  for (let i = 0; i < files.length; i++) {
+    triggerDownload(files[i].blob, files[i].fileName);
+    if (i < files.length - 1) await _sleep(300);
+  }
+  return { saved: true, cancelled: false, toFolder: false };
+}
+
+// Único botão "⬇ BAIXAR ROTA": monta o KML, o CSV (trajeto/diferença) e,
+// quando há ao menos uma rota, a imagem JPG -- e salva os três de uma vez
+// só (_saveRouteExportFiles acima), então a pessoa escolhe a pasta de
+// destino UMA ÚNICA VEZ para a exportação inteira, em vez de o navegador
+// perguntar onde salvar cada arquivo separadamente.
+window.downloadRoute = async function() {
+  const routeReady = Object.entries(ROUTES).filter(([, r]) => r.waypoints.length >= 2);
+  if (!routeReady.length && !LD_INICIO_POINTS.length) {
+    showToast('Adicione ao menos 2 paradas em uma rota antes de baixar');
     return;
   }
 
@@ -2050,207 +2279,38 @@ window.exportRoutesImage = async function() {
   // (ou um erro no meio) faziam o botão ficar preso em "GERANDO IMAGEM…".
   const originalLabel = btn ? (btn.dataset.label || btn.textContent) : null;
   if (btn) btn.dataset.label = originalLabel;
-  if (btn) setButtonLoading(btn, 'GERANDO IMAGEM…');
-  showToast('🛰️ Buscando imagem de satélite…');
+  if (btn) setButtonLoading(btn, 'PREPARANDO…');
 
   try {
-    const routePts = [];
-    ready.forEach(([, r]) => {
-      const coords = (r.roadCoords && r.roadCoords.length >= 2) ? r.roadCoords : r.waypoints;
-      coords.forEach(c => routePts.push({ lat: c.lat, lng: c.lng }));
-    });
+    const kmlFile = _buildRouteKmlFile(routeReady);
+    const csvFile = _buildRouteCsvFile(kmlFile.safeMiddle); // null se trajeto/diferença ainda não estiverem prontos
+    const files = [{ blob: kmlFile.blob, fileName: kmlFile.fileName }];
+    if (csvFile) files.push(csvFile);
 
-    const allPoints = routePts.slice();
-    LD_INICIO_POINTS.forEach(p => allPoints.push(p));
+    let imageWarning = '';
+    let imageIncluded = false;
+    if (routeReady.length) {
+      if (btn) setButtonLoading(btn, 'GERANDO IMAGEM…');
+      showToast('🛰️ Buscando imagem de satélite…');
+      try {
+        const imgFile = await _buildRouteImageFile(routeReady);
+        files.push({ blob: imgFile.blob, fileName: imgFile.fileName });
+        imageWarning = imgFile.warning;
+        imageIncluded = true;
+      } catch (err) {
+        // A imagem falhando não deve derrubar o KML/CSV, que já estão
+        // prontos -- eles ainda são salvos normalmente logo abaixo.
+        console.error('Falha ao gerar imagem da rota:', err);
+        showToast(`⚠ Não foi possível gerar a imagem — ${err && err.message ? err.message : 'erro desconhecido'} (o restante ainda será salvo)`);
+      }
+    }
 
-    // Center the live map on the routes first -- same fitBounds a person
-    // would do by hand -- then use exactly that resulting view as the
-    // image's frame, instead of an independently-computed crop. This is
-    // as close as this can get to "print what's centered on screen":
-    // the actual pixels still come from Esri's export service below (see
-    // why in the comment on ESRI_WORLD_IMAGERY_EXPORT_URL below), because
-    // a literal screenshot of the live Leaflet map can't be saved to a
-    // file at all when the base layer is Google's satellite/hybrid tiles
-    // -- Google's tile servers don't allow cross-origin canvas reads, so
-    // the browser refuses to export a canvas that ever drew one of those
-    // tiles (a "tainted canvas" security restriction, not a bug in this
-    // app). Esri's export endpoint is the CORS-friendly stand-in for that
-    // same imagery.
-    map.fitBounds(L.latLngBounds(allPoints.map(p => [p.lat, p.lng])), { padding: [60, 60], animate: false });
-    const bbox = _computeMercatorBBoxFromBounds(map.getBounds());
+    if (btn) setButtonLoading(btn, files.length > 1 ? 'SALVANDO…' : 'BAIXANDO…');
+    const result = await _saveRouteExportFiles(files);
+    if (result.cancelled) return; // ninguém foi salvo -- a pessoa fechou o seletor de pasta
 
-    // Whitelist de códigos de rodovia + os pontos onde cada uma começa:
-    // exatamente as que alguma das rotas construídas realmente percorre,
-    // vindo direto do próprio OSRM (mesma chamada que já alimenta o campo
-    // TRAJETO:) -- sem depender de Overpass, DNIT ou qualquer fonte
-    // externa de malha viária. Um trecho sem ref/nome no OSRM simplesmente
-    // não ganha tarja, o que é o resultado correto (nada pra rotular ali).
-    const [descA, descB] = await Promise.all([
-      (ROUTES.a.waypoints && ROUTES.a.waypoints.length >= 2) ? _fetchRouteDescription(ROUTES.a.waypoints) : Promise.resolve(null),
-      (ROUTES.b.waypoints && ROUTES.b.waypoints.length >= 2) ? _fetchRouteDescription(ROUTES.b.waypoints) : Promise.resolve(null)
-    ]);
-    const roadSegments = [
-      ...((descA && descA.segments) || []),
-      ...((descB && descB.segments) || [])
-    ];
-    const roadLookupFailed = !roadSegments.length;
-
-    // Base satellite (requested lossless so the only JPEG compression that
-    // ever happens is the final canvas.toBlob() below -- avoids the
-    // double-recompression quality loss of re-saving an already-JPEG base)
-    // and the cities inside the frame are independent of each other, so
-    // fetch both at once instead of one after another. City lookup is
-    // best-effort: if it fails, the image still generates with just the
-    // satellite + our own routes, and a toast at the end says so (instead
-    // of the image just quietly coming out without them).
-    let cityLookupFailed = false;
-    const [baseImg, transportationImg, placesImg, citiesRaw] = await Promise.all([
-      _fetchEsriMapImage(ESRI_WORLD_IMAGERY_EXPORT_URL, bbox, ROUTE_IMAGE_WIDTH, ROUTE_IMAGE_HEIGHT, { format: 'png24' }),
-      _fetchEsriMapImage(ESRI_TRANSPORTATION_EXPORT_URL, bbox, ROUTE_IMAGE_WIDTH, ROUTE_IMAGE_HEIGHT, { format: 'png32', transparent: true, dpi: 300 }).catch(err => {
-        console.warn('Esri World_Transportation overlay indisponível:', err);
-        return null;
-      }),
-      _fetchEsriMapImage(ESRI_BOUNDARIES_PLACES_EXPORT_URL, bbox, ROUTE_IMAGE_WIDTH, ROUTE_IMAGE_HEIGHT, { format: 'png32', transparent: true, dpi: 300 }).catch(err => {
-        console.warn('Esri World_Boundaries_and_Places overlay indisponível:', err);
-        return null;
-      }),
-      // Best-effort on top of the local IBGE dataset below -- not the
-      // primary source anymore, so its failure doesn't set
-      // cityLookupFailed (there's always at least the local list).
-      _fetchCitiesNearRoute(routePts).catch(err => {
-        console.warn('Overpass city lookup indisponível, seguindo só com a lista local de municípios:', err);
-        return [];
-      })
-    ]);
-    // Cities: the local IBGE municipality list (see 21-municipios-br.js)
-    // never depends on a network request, so it's the reliable baseline;
-    // Overpass is merged on top when it's reachable, mainly for named
-    // localities that aren't their own município. If neither the local
-    // lookup nor the merge produces anything, THAT'S the one real "city
-    // lookup failed" case worth telling the person about.
-    const citiesLocal = (typeof _municipiosBrNear === 'function')
-      ? _municipiosBrNear(_sampleRoutePoints(routePts, ROUTE_IMAGE_CITY_SAMPLES), ROUTE_IMAGE_CITY_RADIUS_M / 1000)
-      : [];
-    const citiesForImage = _pickCitiesForImage(
-      citiesLocal.map(_normalizeCityEntry).concat(citiesRaw.map(_normalizeCityEntry)).filter(Boolean)
-    );
-    if (!citiesForImage.length) cityLookupFailed = true;
-
-    const canvas = document.createElement('canvas');
-    canvas.width = ROUTE_IMAGE_WIDTH;
-    canvas.height = ROUTE_IMAGE_HEIGHT;
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(baseImg, 0, 0, ROUTE_IMAGE_WIDTH, ROUTE_IMAGE_HEIGHT);
-    // "Hybrid" road overlay (transparent PNG) -- drawn under our own route
-    // lines on purpose, same as the Overpass road tracing further down, so
-    // the route itself still stands out wherever it runs along a road
-    // this layer also draws.
-    if (transportationImg) ctx.drawImage(transportationImg, 0, 0, ROUTE_IMAGE_WIDTH, ROUTE_IMAGE_HEIGHT);
-
-    const project = (lat, lng) => {
-      const m = _lngLatToMercatorXY(lng, lat);
-      return [
-        (m.x - bbox.xmin) / (bbox.xmax - bbox.xmin) * ROUTE_IMAGE_WIDTH,
-        (bbox.ymax - m.y) / (bbox.ymax - bbox.ymin) * ROUTE_IMAGE_HEIGHT
-      ];
-    };
-
-    // Original (green) drawn first, alternative (red) on top -- matches
-    // the layering in the reference export.
-    ['b', 'a'].forEach(key => {
-      const r = ROUTES[key];
-      if (r.waypoints.length < 2) return;
-      const coords = (r.roadCoords && r.roadCoords.length >= 2) ? r.roadCoords : r.waypoints;
-      ctx.beginPath();
-      coords.forEach((c, i) => {
-        const [px, py] = project(c.lat, c.lng);
-        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-      });
-      ctx.strokeStyle = r.color;
-      ctx.lineWidth = 4 * ROUTE_IMAGE_UI_SCALE;
-      ctx.lineJoin = 'round';
-      ctx.lineCap = 'round';
-      ctx.shadowColor = 'rgba(0,0,0,0.6)';
-      ctx.shadowBlur = 3 * ROUTE_IMAGE_UI_SCALE;
-      ctx.stroke();
-      ctx.shadowBlur = 0;
-    });
-
-    // Place-name overlay (city/place labels only) drawn AFTER the route
-    // lines, unlike the road overlay above -- a city name sitting right on
-    // the route is the normal case here, and hiding it under the route
-    // line would defeat the point of showing it at all.
-    if (placesImg) ctx.drawImage(placesImg, 0, 0, ROUTE_IMAGE_WIDTH, ROUTE_IMAGE_HEIGHT);
-
-    // Shared list of already-placed label boxes so highway shields, the
-    // LD_INICIO tag, and city names don't render stacked on top of each
-    // other when two of them would otherwise land in the same spot -- see
-    // _reserveLabelBox. Order matters a little: whichever draws first gets
-    // to keep its spot, later ones nudge around it.
-    const labelRegistry = [];
-
-    // Highway shields (BR-174, RR-342, RR-203...) drawn AFTER the route
-    // lines, directly at the coordinates where the route itself changes
-    // road -- see _highwaySegmentsWithLocations. Deduped by proximity so
-    // both routes sharing the same junction don't stack two identical
-    // shields on top of each other.
-    (function drawRouteHighwayShields() {
-      const s = ROUTE_IMAGE_UI_SCALE;
-      const placedByCode = {}; // code -> [px,py] already placed for THAT code -- different highways must never suppress each other, even at the same junction
-      roadSegments.forEach(seg => {
-        const [px, py] = project(seg.lat, seg.lng);
-        const placed = placedByCode[seg.code] || (placedByCode[seg.code] = []);
-        const tooClose = placed.some(([qx, qy]) => Math.hypot(px - qx, py - qy) < ROAD_LABEL_MIN_SPACING_PX * s);
-        if (tooClose) return;
-        placed.push([px, py]);
-        _drawRoadRefLabel(ctx, px, py, seg.code, labelRegistry);
-      });
-    })();
-
-    // Diagnostic trail for when the highway labels don't show up on the
-    // image: this prints exactly where it came up empty (no refs
-    // recognized in the route's own OSRM steps), instead of leaving that a
-    // mystery.
-    console.log('[ROTA IMG] trechos de rodovia na rota (código + onde começa):', roadSegments.map(s => s.code).join(', ') || '(nenhum)');
-    console.log('[ROTA IMG] municípios (lista local IBGE):', citiesLocal.length,
-      '+ Overpass:', citiesRaw.length, '=', citiesForImage.length, 'no rótulo final');
-
-    LD_INICIO_POINTS.forEach(p => {
-      const [px, py] = project(p.lat, p.lng);
-      _drawPinMarker(ctx, px, py, LD_INICIO_COLOR);
-      // O deslocamento do rótulo era em pixels fixos, então em outros
-      // tamanhos de saída ele descolava do alfinete.
-      _drawRouteImageLabel(ctx, px + 14 * ROUTE_IMAGE_UI_SCALE, py - 11 * ROUTE_IMAGE_UI_SCALE, 'LD_INICIO_OAE', labelRegistry);
-    });
-
-    citiesForImage.forEach(c => {
-      const [px, py] = project(c.lat, c.lon);
-      _drawCityMarker(ctx, px, py, c.uf ? `${c.name} - ${c.uf}` : c.name, labelRegistry);
-    });
-
-    const code = (ROUTES.a.nameMiddle || ROUTES.b.nameMiddle || '').trim();
-    _drawRouteImageTitle(ctx, code);
-    _drawRouteImageLegend(ctx, ready, LD_INICIO_POINTS.length > 0);
-    _drawRouteImageNorthArrow(ctx, ROUTE_IMAGE_WIDTH, ROUTE_IMAGE_HEIGHT);
-    _drawRouteImageScaleBar(ctx, bbox, ROUTE_IMAGE_WIDTH, ROUTE_IMAGE_HEIGHT);
-    _drawRouteImageAttribution(ctx, ROUTE_IMAGE_WIDTH, ROUTE_IMAGE_HEIGHT);
-
-    canvas.toBlob(blob => {
-      if (!blob) { showToast('⚠ Não foi possível gerar a imagem'); return; }
-      const safeCode = code.replace(/[\\/:*?"<>|]/g, '_');
-      const fileName = safeCode ? `ROTA_ALTERNATIVA_${safeCode}.jpg` : 'ROTA_ALTERNATIVA.jpg';
-      triggerDownload(blob, fileName);
-      const warnings = [];
-      if (roadLookupFailed) warnings.push('nenhuma rodovia identificada no trajeto -- imagem sem rótulos de via');
-      else warnings.push(`${roadSegments.length} rodovia(s) marcada(s)`);
-      if (cityLookupFailed) warnings.push('nenhum município encontrado perto da rota');
-      else warnings.push(`${citiesForImage.length} cidades marcadas`);
-      const warning = warnings.length ? ` (${warnings.join('; ')})` : '';
-      showToast(`⬇ Imagem <span class="accent">${fileName}</span> gerada${warning}`);
-    }, 'image/jpeg', 0.95);
-  } catch (err) {
-    console.error('Falha ao gerar imagem da rota:', err);
-    showToast(`⚠ Não foi possível gerar a imagem — ${err && err.message ? err.message : 'erro desconhecido'} (veja o console para detalhes)`);
+    const destino = result.toFolder ? 'salvos na pasta escolhida' : 'baixados';
+    showToast(`⬇ <span class="accent">${kmlFile.summary}</span> exportado(s) — ${files.length} arquivo(s) ${destino}${imageIncluded ? imageWarning : ''}`);
   } finally {
     if (btn) clearButtonLoading(btn, originalLabel);
   }

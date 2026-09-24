@@ -92,15 +92,34 @@
     return all;
   }
 
-  async function _walkEntry(entry, path, out) {
+  // Per-file/per-folder errors are caught and skipped instead of aborting
+  // the whole walk -- a Dropbox folder often has "online-only" placeholder
+  // files (Smart Sync / Selective Sync) that haven't actually been
+  // downloaded yet, and reading one of those through this API can reject.
+  // Before this, a single unreadable file made the ENTIRE dropped folder
+  // fail with "não foi possível ler a pasta arrastada", which is exactly
+  // what looked like "the folder isn't recognized" -- now everything else
+  // still gets checked, and the skipped items are reported afterwards.
+  async function _walkEntry(entry, path, out, failures) {
     if (entry.isFile) {
-      await new Promise((resolve, reject) => {
-        entry.file(file => { out.push({ relativePath: path + entry.name, size: file.size, file }); resolve(); }, reject);
-      });
+      try {
+        const file = await new Promise((resolve, reject) => entry.file(resolve, reject));
+        out.push({ relativePath: path + entry.name, size: file.size, file });
+      } catch (err) {
+        console.warn('Não foi possível ler o arquivo (pode estar "somente online" no Dropbox):', path + entry.name, err);
+        failures.push(path + entry.name);
+      }
     } else if (entry.isDirectory) {
-      const children = await _readAllEntries(entry.createReader());
+      let children;
+      try {
+        children = await _readAllEntries(entry.createReader());
+      } catch (err) {
+        console.warn('Não foi possível listar a pasta:', path + entry.name, err);
+        failures.push(path + entry.name + '/');
+        return;
+      }
       for (const child of children) {
-        await _walkEntry(child, path + entry.name + '/', out);
+        await _walkEntry(child, path + entry.name + '/', out, failures);
       }
     }
   }
@@ -112,10 +131,11 @@
       if (entry) topEntries.push(entry);
     }
     const out = [];
+    const failures = [];
     for (const entry of topEntries) {
-      await _walkEntry(entry, '', out);
+      await _walkEntry(entry, '', out, failures);
     }
-    return out;
+    return { entries: out, failures };
   }
 
   // Case-insensitive child-folder lookup, tolerant of a trailing note the
@@ -498,6 +518,8 @@
     }
   }
 
+  const tabContent = document.getElementById('tabContentConferencia');
+
   if (selectBtn && folderInput && dropzone) {
     selectBtn.addEventListener('click', ev => { ev.stopPropagation(); folderInput.click(); });
     dropzone.addEventListener('click', e => {
@@ -518,13 +540,22 @@
       });
     });
 
+    // Drag target covers the WHOLE tab, not just the dropzone box -- a
+    // folder dropped a few pixels outside the compact dropzone used to do
+    // nothing at all (no listener there caught it), which looked exactly
+    // like "the folder isn't recognized". Only the outer container
+    // (tabContent, when present) gets the listeners now, since drop/drag
+    // events bubble up through the dropzone into it anyway -- attaching to
+    // both would run the drop handler twice for the same drop.
+    const dropTarget = tabContent || dropzone;
+
     ['dragenter', 'dragover'].forEach(evt => {
-      dropzone.addEventListener(evt, e => { e.preventDefault(); dropzone.classList.add('conf-drag'); });
+      dropTarget.addEventListener(evt, e => { e.preventDefault(); dropzone.classList.add('conf-drag'); });
     });
     ['dragleave', 'drop'].forEach(evt => {
-      dropzone.addEventListener(evt, e => { e.preventDefault(); dropzone.classList.remove('conf-drag'); });
+      dropTarget.addEventListener(evt, e => { e.preventDefault(); dropzone.classList.remove('conf-drag'); });
     });
-    dropzone.addEventListener('drop', async e => {
+    dropTarget.addEventListener('drop', async e => {
       const items = e.dataTransfer && e.dataTransfer.items;
       const hasEntryApi = items && items.length && items[0].webkitGetAsEntry;
       if (!hasEntryApi) {
@@ -533,14 +564,19 @@
       }
       setButtonLoading(selectBtn, 'LENDO PASTA…');
       try {
-        const entries = await _readDroppedItems(items);
+        const { entries, failures } = await _readDroppedItems(items);
         if (!entries.length) {
-          showToast('⚠ Nenhum arquivo encontrado na pasta arrastada');
+          showToast(failures.length
+            ? '⚠ Não foi possível ler os arquivos da pasta (podem estar "somente online" no Dropbox — abra a pasta no gerenciador de arquivos pra garantir que tudo foi baixado) — tente o botão "Selecionar pasta 01_CADASTRAL"'
+            : '⚠ Nenhum arquivo encontrado na pasta arrastada — confirme que soltou a PASTA (não um atalho ou link) sobre esta aba');
           clearButtonLoading(selectBtn, '📁 Selecionar pasta 01_CADASTRAL');
           return;
         }
         setButtonLoading(selectBtn, 'CONFERINDO…');
-        _runFromTree(_buildConfTreeFromPaths(entries));
+        await _runFromTree(_buildConfTreeFromPaths(entries));
+        if (failures.length) {
+          showToast(`⚠ ${failures.length} item(ns) da pasta não puderam ser lidos e foram ignorados (podem estar "somente online" no Dropbox)`);
+        }
       } catch (err) {
         console.error('Falha ao ler a pasta arrastada:', err);
         showToast('⚠ Não foi possível ler a pasta arrastada — tente o botão "Selecionar pasta 01_CADASTRAL"');

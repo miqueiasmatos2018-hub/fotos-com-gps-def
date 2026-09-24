@@ -3,6 +3,9 @@
 // "Conferência" tab: checks a local folder (typically a Dropbox-synced
 // "01_CADASTRAL" folder) against the fixed set of subfolders/files a
 // complete OAE cadastral package must have, and reports what's missing.
+// Also checks each photo in 02_FOTOS_SUPERIORES/03_FOTOS_INFERIORES for
+// resolution (>=12MP), file size (<29MB) and GPS metadata (via exifr,
+// already loaded for the Fotos tab -- see _checkPhotosQuality).
 //
 // Folder reading uses the plain <input type="file" webkitdirectory> input
 // instead of window.showDirectoryPicker() (used elsewhere in this app):
@@ -37,9 +40,13 @@
   // Shared by both entry points below: the file input (webkitRelativePath
   // on every File) and a folder dragged onto the dropzone (relative paths
   // walked by hand via the DataTransferItem entry API, see _readDroppedItems).
+  // Each file entry keeps a reference to the actual File object (not just
+  // its name/size) so 02_FOTOS_SUPERIORES/03_FOTOS_INFERIORES can later
+  // read resolution/size/GPS straight out of the real file -- see
+  // _checkPhotosQuality below.
   function _buildConfTreeFromPaths(entries) {
     const root = { name: null, dirs: {}, files: [] };
-    entries.forEach(({ relativePath, size }) => {
+    entries.forEach(({ relativePath, size, file }) => {
       const parts = (relativePath || '').split('/').filter(Boolean);
       if (!parts.length) return;
       if (root.name == null) root.name = parts[0];
@@ -51,7 +58,7 @@
         node = node.dirs[key];
       }
       const fname = parts[parts.length - 1];
-      if (parts.length > 1) node.files.push({ name: fname, lower: fname.toLowerCase(), size });
+      if (parts.length > 1) node.files.push({ name: fname, lower: fname.toLowerCase(), size, file });
     });
     return root;
   }
@@ -60,7 +67,7 @@
     const entries = [];
     for (let i = 0; i < fileList.length; i++) {
       const file = fileList[i];
-      entries.push({ relativePath: file.webkitRelativePath || file.name, size: file.size });
+      entries.push({ relativePath: file.webkitRelativePath || file.name, size: file.size, file });
     }
     return _buildConfTreeFromPaths(entries);
   }
@@ -88,7 +95,7 @@
   async function _walkEntry(entry, path, out) {
     if (entry.isFile) {
       await new Promise((resolve, reject) => {
-        entry.file(file => { out.push({ relativePath: path + entry.name, size: file.size }); resolve(); }, reject);
+        entry.file(file => { out.push({ relativePath: path + entry.name, size: file.size, file }); resolve(); }, reject);
       });
     } else if (entry.isDirectory) {
       const children = await _readAllEntries(entry.createReader());
@@ -180,13 +187,75 @@
     return { status, detail: parts.join(' ') };
   }
 
+  // ─── PHOTO QUALITY (resolution / file size / GPS) ──────────────────────
+  // Reads each photo's actual pixel dimensions and its EXIF/XMP GPS tags
+  // (reusing exifr, already loaded for the Fotos tab) to flag anything
+  // under 12 MP, at or over 29 MB, or missing GPS coordinates.
+  const CONF_MIN_MEGAPIXELS = 12;
+  const CONF_MAX_FILE_MB = 29;
+
+  function _isImageFile(f) {
+    return /\.(jpe?g|png|tiff?|heic|heif)$/i.test(f.name);
+  }
+
+  async function _readImageDimsAndGps(file) {
+    let width, height, hasGps = false;
+    try {
+      const meta = await exifr.parse(file, {
+        tiff: true, exif: true, gps: true, ifd0: true, mergeOutput: true,
+        translateKeys: true, translateValues: true, reviveValues: true, sanitize: true,
+      });
+      if (meta) {
+        width = meta.ExifImageWidth || meta.PixelXDimension || meta.ImageWidth;
+        height = meta.ExifImageHeight || meta.PixelYDimension || meta.ImageHeight;
+        if ((meta.latitude != null && meta.longitude != null) || (meta.GPSLatitude != null && meta.GPSLongitude != null)) {
+          hasGps = true;
+        }
+      }
+    } catch (e) { /* segue para o fallback abaixo */ }
+    // Nem toda câmera grava ImageWidth/Height no EXIF -- decodifica a
+    // imagem de verdade quando o metadado não trouxe a resolução.
+    if (!width || !height) {
+      try {
+        const bitmap = await createImageBitmap(file);
+        width = bitmap.width;
+        height = bitmap.height;
+        if (bitmap.close) bitmap.close();
+      } catch (e) { /* imagem ilegível -- fica sem resolução mesmo */ }
+    }
+    return { width, height, hasGps };
+  }
+
+  async function _checkPhotosQuality(node) {
+    if (!node) return null;
+    const photoFiles = node.files.filter(f => _isImageFile(f) && f.file);
+    if (!photoFiles.length) return null;
+    const results = await runWithConcurrency(photoFiles, 4, async f => {
+      const { width, height, hasGps } = await _readImageDimsAndGps(f.file);
+      const mp = width && height ? (width * height) / 1e6 : null;
+      const sizeMB = f.size / (1024 * 1024);
+      const problems = [];
+      if (mp == null) problems.push('não foi possível ler a resolução');
+      else if (mp < CONF_MIN_MEGAPIXELS) problems.push(`resolução baixa (${mp.toFixed(1)} MP, esperado ao menos ${CONF_MIN_MEGAPIXELS} MP)`);
+      if (sizeMB >= CONF_MAX_FILE_MB) problems.push(`arquivo grande (${sizeMB.toFixed(1)} MB, esperado menos de ${CONF_MAX_FILE_MB} MB)`);
+      if (!hasGps) problems.push('sem coordenadas GPS nos metadados');
+      return { name: f.name, problems };
+    });
+    const withProblems = results.filter(r => r && r.problems.length);
+    if (!withProblems.length) {
+      return { status: 'ok', label: `Qualidade das fotos — OK (${photoFiles.length} foto(s): ≥${CONF_MIN_MEGAPIXELS} MP, <${CONF_MAX_FILE_MB} MB, com GPS)` };
+    }
+    const detailList = withProblems.map(r => `${r.name} (${r.problems.join('; ')})`).join(' | ');
+    return { status: 'fail', label: `Qualidade das fotos — ${withProblems.length} de ${photoFiles.length} com problema(s): ${detailList}` };
+  }
+
   // ─── FULL CHECKLIST ─────────────────────────────────────────────────────
   // Mirrors the exact structure the user specified for 01_CADASTRAL. Each
   // top-level entry becomes one card; 01_GPS_OAE and 04_HISTORICO also get
   // a breakdown of their own sub-requirements. Every "XXXXXX" code found in
   // a filename (04_HISTORICO, 05_RVT, 06_PDF, the loose root .rvt) is
   // collected to flag a mismatched/mixed OAE code across the folder.
-  function runConferencia(root) {
+  async function runConferencia(root) {
     const items = [];
     const codes = [];
 
@@ -237,17 +306,23 @@
       items.push({ title: '01_GPS_OAE', status: worst, subs });
     }
 
-    // 02_FOTOS_SUPERIORES
-    const fotosSup = _findDir(root, '02_fotos_superiores');
-    items.push(!fotosSup
-      ? { title: '02_FOTOS_SUPERIORES', status: 'fail', detail: 'Pasta não encontrada.' }
-      : Object.assign({ title: '02_FOTOS_SUPERIORES' }, _checkSequentialPhotos(fotosSup, { minCount: 11, requireStartAt: 1 })));
+    // 02_FOTOS_SUPERIORES / 03_FOTOS_INFERIORES -- numeração sequencial +
+    // qualidade (resolução ≥12MP, tamanho <29MB, GPS nos metadados).
+    async function _evalFotosFolder(title, node, seqOpts) {
+      if (!node) return { title, status: 'fail', detail: 'Pasta não encontrada.' };
+      const seq = _checkSequentialPhotos(node, seqOpts);
+      const subs = [{ label: seq.detail, status: seq.status }];
+      const quality = await _checkPhotosQuality(node);
+      if (quality) subs.push({ label: quality.label, status: quality.status });
+      const worst = subs.some(s => s.status === 'fail') ? 'fail' : (subs.some(s => s.status === 'warn') ? 'warn' : 'ok');
+      return { title, status: worst, subs };
+    }
 
-    // 03_FOTOS_INFERIORES
+    const fotosSup = _findDir(root, '02_fotos_superiores');
+    items.push(await _evalFotosFolder('02_FOTOS_SUPERIORES', fotosSup, { minCount: 11, requireStartAt: 1 }));
+
     const fotosInf = _findDir(root, '03_fotos_inferiores');
-    items.push(!fotosInf
-      ? { title: '03_FOTOS_INFERIORES', status: 'fail', detail: 'Pasta não encontrada.' }
-      : Object.assign({ title: '03_FOTOS_INFERIORES' }, _checkSequentialPhotos(fotosInf, { minCount: 6, requireStartAt: null })));
+    items.push(await _evalFotosFolder('03_FOTOS_INFERIORES', fotosInf, { minCount: 6, requireStartAt: null }));
 
     // 04_HISTORICO
     const historico = _findDir(root, '04_historico');
@@ -410,9 +485,10 @@
   const folderInput = document.getElementById('confFolderInput');
   const reportBtn = document.getElementById('confBtnGenerateReport');
 
-  function _runFromTree(tree) {
+  async function _runFromTree(tree) {
     try {
-      const items = runConferencia(tree);
+      setButtonLoading(selectBtn, 'VERIFICANDO FOTOS…');
+      const items = await runConferencia(tree);
       _renderConferencia(items, tree.name);
     } catch (err) {
       console.error('Falha na conferência da pasta:', err);

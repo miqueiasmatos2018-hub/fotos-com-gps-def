@@ -1624,6 +1624,16 @@ function _computeMercatorBBoxForImage(points) {
 
 const ESRI_IMAGE_TIMEOUT_MS = 20000; // satellite/reference images are a bigger payload than a JSON query -- needs more room than the Overpass timeout below
 
+async function _fetchEsriImageOnce(url, timeoutMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function _fetchEsriMapImage(serviceUrl, bbox, width, height, extraParams) {
   const params = new URLSearchParams(Object.assign({
     bbox: `${bbox.xmin},${bbox.ymin},${bbox.xmax},${bbox.ymax}`,
@@ -1633,32 +1643,37 @@ async function _fetchEsriMapImage(serviceUrl, bbox, width, height, extraParams) 
     format: 'jpg',
     f: 'image'
   }, extraParams || {}));
+  const url = `${serviceUrl}?${params.toString()}`;
 
   // Same reasoning as the Overpass calls above: a bare fetch() never times
   // out on its own, and this is the one call in the whole export with no
   // fallback (no satellite image, no photo at all) -- so if it hangs, the
   // button used to just sit on "GERANDO IMAGEM…" forever with no error.
-  // One retry, since a dropped connection on a single large image request
-  // is common enough to be worth one more try before giving up.
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), ESRI_IMAGE_TIMEOUT_MS);
-  let res;
-  try {
-    res = await fetch(`${serviceUrl}?${params.toString()}`, { signal: controller.signal });
-  } catch (err) {
-    clearTimeout(timer);
-    console.warn('Esri image fetch failed, retrying once:', err);
-    const controller2 = new AbortController();
-    const timer2 = setTimeout(() => controller2.abort(), ESRI_IMAGE_TIMEOUT_MS);
+  //
+  // Retries on ANY failure now -- a dropped connection OR a non-2xx HTTP
+  // status. Before, only a network-level fetch() rejection was retried;
+  // a transient HTTP 500 from Esri's shared demo server (which happens
+  // under load) failed the whole image on the very first try, which also
+  // ate up the page's "recent user gesture" while retrying/falling back
+  // further down the export -- see the comment on _saveRouteExportFiles
+  // for why that mattered for people who then couldn't save the KML/CSV
+  // either.
+  let res, lastErr;
+  for (let attempt = 1; attempt <= 2; attempt++) {
     try {
-      res = await fetch(`${serviceUrl}?${params.toString()}`, { signal: controller2.signal });
-    } finally {
-      clearTimeout(timer2);
+      res = await _fetchEsriImageOnce(url, ESRI_IMAGE_TIMEOUT_MS);
+      if (res.ok) break;
+      lastErr = new Error(`HTTP ${res.status}`);
+    } catch (err) {
+      lastErr = err;
+      res = null;
     }
-  } finally {
-    clearTimeout(timer);
+    if (attempt < 2) {
+      console.warn('Esri image fetch failed, retrying once:', lastErr);
+      await _sleep(800);
+    }
   }
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (!res || !res.ok) throw lastErr || new Error('Falha ao buscar imagem');
   const blob = await res.blob();
   const objUrl = URL.createObjectURL(blob);
   try {
@@ -2214,45 +2229,64 @@ async function _buildRouteImageFile(ready) {
   return { blob, fileName, warning };
 }
 
-// Salva os arquivos gerados (KML, CSV, JPG) escolhendo a pasta de destino
-// UMA VEZ via File System Access API -- mesmo padrão já usado em
-// 06-export.js/20-fotos-superiores.js/22-gpx.js -- em vez de um <a
-// download> por arquivo, que faz o navegador perguntar onde salvar (ou
-// disparar downloads soltos, um de cada vez) a cada arquivo da exportação.
-async function _saveRouteExportFiles(files) {
+// Pede a pasta de destino, sozinho, sem gerar nada ainda. Chamado bem no
+// início de downloadRoute(), ainda "dentro" do clique da pessoa -- ver o
+// comentário grande em _saveRouteExportFiles logo abaixo para o motivo.
+async function _pickRouteExportFolder() {
+  if (!window.showDirectoryPicker) return { dirHandle: null, cancelled: false };
+  try {
+    const dirHandle = await window.showDirectoryPicker({
+      mode: 'readwrite',
+      startIn: 'downloads',
+      id: 'rotas-export'
+    });
+    return { dirHandle, cancelled: false };
+  } catch (e) {
+    if (e && e.name === 'AbortError') return { dirHandle: null, cancelled: true }; // cancelado pela pessoa
+    return { dirHandle: null, cancelled: false }; // sem permissão / API indisponível -> cai nos downloads soltos
+  }
+}
+
+// Salva os arquivos gerados (KML, CSV, JPG) na pasta escolhida (dirHandle,
+// já obtido por _pickRouteExportFolder ANTES de qualquer fetch) -- mesmo
+// padrão de "escolher a pasta uma vez" já usado em
+// 06-export.js/20-fotos-superiores.js/22-gpx.js, em vez de um <a download>
+// por arquivo.
+//
+// Pedir a pasta só AQUI (depois de já ter esperado a rota/imagem de
+// satélite, ou seja, minutos-milissegundos ou segundos depois do clique)
+// era o bug: o navegador só permite showDirectoryPicker() enquanto o
+// clique da pessoa ainda está "fresco" (ativação do usuário); depois de
+// vários fetches em sequência -- descrição da rota via OSRM, imagem de
+// satélite da Esri (até 20s de timeout, e pior ainda se o serviço estava
+// devolvendo HTTP 500, como alguns usuários relataram) -- essa janela já
+// tinha expirado, o showDirectoryPicker() falhava silenciosamente
+// (SecurityError, não AbortError), e a exportação caía para downloads
+// soltos via <a download>. Só que disparar MAIS DE UM download por <a>
+// sem um gesto do usuário "fresco" é exatamente o que o Chrome bloqueia
+// ("download automático bloqueado") -- daí quem via o erro da imagem
+// também não conseguia salvar o resto. Pedir a pasta antes de qualquer
+// fetch resolve os dois problemas de uma vez.
+async function _saveRouteExportFiles(files, dirHandle) {
   if (!files.length) return { saved: false, cancelled: false, toFolder: false };
 
-  if (window.showDirectoryPicker) {
-    let dirHandle;
+  if (dirHandle) {
     try {
-      dirHandle = await window.showDirectoryPicker({
-        mode: 'readwrite',
-        startIn: 'downloads',
-        id: 'rotas-export'
-      });
-    } catch (e) {
-      if (e && e.name === 'AbortError') return { saved: false, cancelled: true, toFolder: false }; // cancelado pela pessoa
-      dirHandle = null; // sem permissão / API indisponível -> cai nos downloads soltos abaixo
-    }
-
-    if (dirHandle) {
-      try {
-        const used = new Set();
-        for (const f of files) {
-          const filename = makeUniqueName(f.fileName, used);
-          const fileHandle = await dirHandle.getFileHandle(filename, { create: true });
-          const writable = await fileHandle.createWritable();
-          await writable.write(f.blob);
-          await writable.close();
-        }
-        return { saved: true, cancelled: false, toFolder: true };
-      } catch (err) {
-        console.error('Exportação da rota para pasta falhou, caindo para downloads soltos:', err);
+      const used = new Set();
+      for (const f of files) {
+        const filename = makeUniqueName(f.fileName, used);
+        const fileHandle = await dirHandle.getFileHandle(filename, { create: true });
+        const writable = await fileHandle.createWritable();
+        await writable.write(f.blob);
+        await writable.close();
       }
+      return { saved: true, cancelled: false, toFolder: true };
+    } catch (err) {
+      console.error('Exportação da rota para pasta falhou, caindo para downloads soltos:', err);
     }
   }
 
-  // Alternativa (Firefox/Safari, ou permissão negada): um <a download> por
+  // Alternativa (Firefox/Safari, permissão negada, ou API indisponível): um <a download> por
   // arquivo, com um pequeno intervalo entre cada um -- disparar vários
   // downloads no mesmo instante faz o navegador bloquear ou juntar tudo.
   for (let i = 0; i < files.length; i++) {
@@ -2279,6 +2313,16 @@ window.downloadRoute = async function() {
   // (ou um erro no meio) faziam o botão ficar preso em "GERANDO IMAGEM…".
   const originalLabel = btn ? (btn.dataset.label || btn.textContent) : null;
   if (btn) btn.dataset.label = originalLabel;
+
+  // Pede a pasta de destino JÁ AQUI, antes de qualquer fetch -- ver o
+  // comentário grande em _saveRouteExportFiles acima para o motivo (perder
+  // a "ativação do usuário" durante os fetches da imagem fazia o
+  // showDirectoryPicker falhar depois, e os downloads soltos de fallback
+  // ficavam bloqueados pelo navegador).
+  if (btn) setButtonLoading(btn, 'ESCOLHA A PASTA…');
+  const { dirHandle, cancelled: pickerCancelled } = await _pickRouteExportFolder();
+  if (pickerCancelled) { if (btn) clearButtonLoading(btn, originalLabel); return; } // pessoa fechou o seletor de pasta antes de começar
+
   if (btn) setButtonLoading(btn, 'PREPARANDO…');
 
   try {
@@ -2306,7 +2350,7 @@ window.downloadRoute = async function() {
     }
 
     if (btn) setButtonLoading(btn, files.length > 1 ? 'SALVANDO…' : 'BAIXANDO…');
-    const result = await _saveRouteExportFiles(files);
+    const result = await _saveRouteExportFiles(files, dirHandle);
     if (result.cancelled) return; // ninguém foi salvo -- a pessoa fechou o seletor de pasta
 
     const destino = result.toFolder ? 'salvos na pasta escolhida' : 'baixados';
